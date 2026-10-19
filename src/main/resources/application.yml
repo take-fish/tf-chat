@@ -20,6 +20,16 @@ spring:
 server:
   port: 8102
 
+app:
+  chat:
+    relay-enabled: ${CHAT_RELAY_ENABLED:true}
+    presence-ttl-ms: ${CHAT_PRESENCE_TTL_MS:60000}
+    history-limit: 1000
+    dm-history-limit: 500
+    offline-limit: 200
+    max-content-length: 2000
+    max-nickname-length: 32
+
 management:
   endpoints:
     web:

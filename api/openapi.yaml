@@ -1,8 +1,11 @@
 openapi: 3.0.3
 info:
   title: tf-chat API
-  version: 0.1.0
-  description: FishMatrix 聊天消息服务：群聊 / 私聊与消息同步接口契约（与实现同仓演进）
+  version: 0.2.0
+  description: |
+    FishMatrix 聊天消息服务：群组、历史、在线成员与私聊（服务端中转）。
+    WebSocket `/ws/chat` 承载实时消息，REST 仅用于目录/历史查询。
+
 paths:
   /api/v1/chat/health:
     get:
@@ -10,3 +13,91 @@ paths:
       responses:
         "200":
           description: 服务正常
+
+  /api/v1/chat/groups:
+    get:
+      summary: 群组列表（含在线人数）
+      responses:
+        "200":
+          description: |
+            { "groups": [ { "id", "name", "description", "onlineCount" } ] }
+
+  /api/v1/chat/groups/{groupId}/history:
+    get:
+      summary: 群组最近消息
+      parameters:
+        - in: path
+          name: groupId
+          required: true
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, minimum: 1, maximum: 200 }
+      responses:
+        "200":
+          description: '{ "messages": ChatMessage[] }，按时间升序'
+        "400":
+          description: 群组不存在或参数非法
+
+  /api/v1/chat/groups/{groupId}/members:
+    get:
+      summary: 群组在线成员
+      parameters:
+        - in: path
+          name: groupId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: '{ "members": OnlineMember[], "count": number }'
+
+  /api/v1/chat/dm/{peerUserId}/history:
+    get:
+      summary: 与指定用户的私聊历史
+      parameters:
+        - in: path
+          name: peerUserId
+          required: true
+          schema: { type: string }
+        - in: query
+          name: userId
+          required: true
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50 }
+      responses:
+        "200":
+          description: '{ "messages": ChatMessage[] }'
+
+  /ws/chat:
+    get:
+      summary: 聊天 WebSocket（不在 OpenAPI 运行时暴露，仅作契约说明）
+      description: |
+        连接参数：`userId`（[A-Za-z0-9_-]{1,64}）、`nickname`（≤32）。
+        客户端帧：join {groupId} / message {content, kind, clientMsgId?} /
+        dm {toUserId, content, kind, clientMsgId?} / ping {ts} / leave。
+        服务端帧：ready / presence / message / dm / dm_offline / pong / error / left。
+components:
+  schemas:
+    ChatMessage:
+      type: object
+      properties:
+        id: { type: string }
+        groupId: { type: string, nullable: true }
+        fromUserId: { type: string }
+        fromNickname: { type: string }
+        fromNode: { type: string, example: dev-node-62 }
+        toUserId: { type: string, nullable: true }
+        content: { type: string }
+        kind: { type: string, enum: [text, ascii] }
+        ts: { type: integer, format: int64 }
+        clientMsgId: { type: string, nullable: true }
+    OnlineMember:
+      type: object
+      properties:
+        groupId: { type: string, nullable: true }
+        userId: { type: string }
+        nickname: { type: string }
+        node: { type: string }
+        joinedAt: { type: integer, format: int64 }
