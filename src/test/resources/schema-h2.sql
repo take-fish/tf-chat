@@ -33,6 +33,15 @@ CREATE INDEX IF NOT EXISTS idx_chat_message_conversation
 CREATE INDEX IF NOT EXISTS idx_chat_message_created
     ON chat_message (created_at);
 
+CREATE TABLE IF NOT EXISTS chat_image (
+    id VARCHAR(64) NOT NULL,
+    owner_user_id VARCHAR(64) NOT NULL,
+    content_type VARCHAR(32) NOT NULL,
+    size BIGINT NOT NULL,
+    created_at TIMESTAMP(3) NOT NULL,
+    PRIMARY KEY (id)
+);
+
 CREATE TABLE IF NOT EXISTS chat_read_state (
     user_id VARCHAR(64) NOT NULL,
     conversation_id VARCHAR(148) NOT NULL,

@@ -25,6 +25,10 @@ spring:
     init:
       mode: ${SQL_INIT_MODE:always}
       encoding: UTF-8
+  servlet:
+    multipart:
+      max-file-size: 6MB
+      max-request-size: 8MB
   data:
     redis:
       host: ${REDIS_HOST:10.28.13.214}
@@ -49,6 +53,9 @@ app:
     recall-window-seconds: ${CHAT_RECALL_WINDOW_SECONDS:120}
     rate-limit-per-10s: ${CHAT_RATE_LIMIT_PER_10S:20}
     allowed-origins: ${CHAT_ALLOWED_ORIGINS:*}
+    image-dir: ${CHAT_IMAGE_DIR:./data/chat-images}
+    max-image-bytes: ${CHAT_MAX_IMAGE_BYTES:5242880}
+    max-group-image-bytes: ${CHAT_MAX_GROUP_IMAGE_BYTES:1048576}
 
 management:
   endpoints:

@@ -149,6 +149,7 @@ class ChatAuthServiceTest {
     private static ChatProperties properties() {
         return new ChatProperties(
                 false, 60_000, 1000, 500, 200, 2000, 32,
-                "http://user", 60, 60, 120, 20, List.of("*"));
+                "http://user", 60, 60, 120, 20, List.of("*"),
+                "target/chat-images", 5_242_880, 1_048_576);
     }
 }

@@ -30,6 +30,16 @@ CREATE TABLE IF NOT EXISTS chat_message (
     KEY idx_chat_message_created (created_at)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS chat_image (
+    id VARCHAR(64) NOT NULL,
+    owner_user_id VARCHAR(64) NOT NULL,
+    content_type VARCHAR(32) NOT NULL,
+    size BIGINT NOT NULL,
+    created_at DATETIME(3) NOT NULL,
+    PRIMARY KEY (id),
+    KEY idx_chat_image_owner (owner_user_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS chat_read_state (
     user_id VARCHAR(64) NOT NULL,
     conversation_id VARCHAR(148) NOT NULL,

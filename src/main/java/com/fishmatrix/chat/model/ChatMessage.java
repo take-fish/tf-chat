@@ -16,4 +16,5 @@ public record ChatMessage(
 
     public static final String KIND_TEXT = "text";
     public static final String KIND_ASCII = "ascii";
+    public static final String KIND_IMAGE = "image";
 }

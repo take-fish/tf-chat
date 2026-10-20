@@ -96,7 +96,10 @@ class FakeChatMessageRepository implements ChatMessageRepository {
         ChatMessage existing = messages.stream()
                 .filter(message -> message.id().equals(messageId))
                 .findFirst()
-                .orElseThrow(() -> ChatException.notFound("消息不存在"));
+                .orElseThrow(() -> ChatException.notFound("消息不存在或群聊消息不支持撤回"));
+        if (existing.groupId() != null) {
+            throw ChatException.badRequest("群聊为临时会话，不支持撤回");
+        }
         if (!existing.fromUserId().equals(userId)) {
             throw ChatException.forbidden("只能撤回自己的消息");
         }
@@ -132,12 +135,10 @@ class FakeChatMessageRepository implements ChatMessageRepository {
     @Override
     public UnreadSummary unread(String userId) {
         Map<String, Integer> groupUnread = new LinkedHashMap<>();
-        int total = 0;
         for (ChatGroup group : groups) {
-            int count = unreadCount(ConversationIds.group(group.id()), userId);
-            groupUnread.put(group.id(), count);
-            total += count;
+            groupUnread.put(group.id(), 0);
         }
+        int total = 0;
         Map<String, Integer> dmUnread = new LinkedHashMap<>();
         for (String conversationId : messages.stream()
                 .filter(message -> message.groupId() == null
