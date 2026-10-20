@@ -19,4 +19,8 @@ public record ChatEvent(
     public static ChatEvent presence(String groupId, List<OnlineMember> members) {
         return new ChatEvent("presence", groupId, null, members);
     }
+
+    public static ChatEvent recalled(String target, ChatMessage message) {
+        return new ChatEvent("recalled", target, message, null);
+    }
 }

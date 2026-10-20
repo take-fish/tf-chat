@@ -5,17 +5,31 @@ spring:
     nacos:
       server-addr: ${NACOS_ADDR:10.28.13.214:8848}
       discovery:
+        namespace: ${NACOS_NAMESPACE:fm-prod}
         username: ${NACOS_USERNAME:nacos}
         password: ${NACOS_PASSWORD:}
         fail-fast: false
+      config:
+        namespace: ${NACOS_NAMESPACE:fm-prod}
+        group: FM
+        username: ${NACOS_USERNAME:nacos}
+        password: ${NACOS_PASSWORD:}
+        file-extension: yaml
+        import-check:
+          enabled: false
   datasource:
-    url: jdbc:mysql://${MYSQL_HOST:10.28.13.214}:${MYSQL_PORT:3306}/fm_chat?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://${MYSQL_HOST:10.28.13.214}:${MYSQL_PORT:3306}/${MYSQL_DB:fm_chat}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
     username: ${MYSQL_APP_USER:fm_app}
     password: ${MYSQL_APP_PASSWORD:}
+  sql:
+    init:
+      mode: ${SQL_INIT_MODE:always}
+      encoding: UTF-8
   data:
     redis:
       host: ${REDIS_HOST:10.28.13.214}
       port: ${REDIS_PORT:6379}
+      database: ${REDIS_DATABASE:0}
 
 server:
   port: 8102
@@ -29,6 +43,12 @@ app:
     offline-limit: 200
     max-content-length: 2000
     max-nickname-length: 32
+    user-service-url: ${TF_USER_URL:http://127.0.0.1:8101}
+    ws-ticket-ttl-seconds: ${CHAT_WS_TICKET_TTL_SECONDS:60}
+    auth-cache-ttl-seconds: ${CHAT_AUTH_CACHE_TTL_SECONDS:60}
+    recall-window-seconds: ${CHAT_RECALL_WINDOW_SECONDS:120}
+    rate-limit-per-10s: ${CHAT_RATE_LIMIT_PER_10S:20}
+    allowed-origins: ${CHAT_ALLOWED_ORIGINS:*}
 
 management:
   endpoints:

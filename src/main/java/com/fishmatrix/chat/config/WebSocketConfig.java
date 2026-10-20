@@ -1,5 +1,6 @@
 package com.fishmatrix.chat.config;
 
+import com.fishmatrix.chat.auth.WsTicketHandshakeInterceptor;
 import com.fishmatrix.chat.ws.ChatWebSocketHandler;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
@@ -11,15 +12,22 @@ import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry
 public class WebSocketConfig implements WebSocketConfigurer {
 
     private final ChatWebSocketHandler chatWebSocketHandler;
+    private final WsTicketHandshakeInterceptor ticketInterceptor;
+    private final ChatProperties properties;
 
-    public WebSocketConfig(ChatWebSocketHandler chatWebSocketHandler) {
+    public WebSocketConfig(
+            ChatWebSocketHandler chatWebSocketHandler,
+            WsTicketHandshakeInterceptor ticketInterceptor,
+            ChatProperties properties) {
         this.chatWebSocketHandler = chatWebSocketHandler;
+        this.ticketInterceptor = ticketInterceptor;
+        this.properties = properties;
     }
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
-        // 一期无登录鉴权，同源部署下允许局域网内的浏览器直连
         registry.addHandler(chatWebSocketHandler, "/ws/chat")
-                .setAllowedOriginPatterns("*");
+                .addInterceptors(ticketInterceptor)
+                .setAllowedOriginPatterns(properties.allowedOrigins().toArray(String[]::new));
     }
 }

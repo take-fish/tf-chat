@@ -1,59 +1,155 @@
 # tf-chat
 
-FishMatrix（摸鱼矩阵）聊天消息服务：群聊 / 私聊与消息同步 —— Spring Boot 3 + JDK 17。
+FishMatrix（摸鱼矩阵）聊天消息服务：登录态群聊 / 私聊、消息持久化、游标分页、搜索、撤回与未读同步 —— Spring Boot 3 + JDK 17。
 
 - 端口：`8102`
-- 健康检查：`GET /actuator/health`、`GET /api/v1/chat/health`
-- 实时通道：`WS /ws/chat?userId=<id>&nickname=<name>`
-- 数据中心：Redis（群组、历史 Stream、在线状态、私聊离线、Pub/Sub 广播）
-- 当前实现：3 个默认群组、群聊实时广播、私聊服务端定向中转、离线消息补发
+- 健康检查：`GET /actuator/health`、`GET /api/v1/chat/health`（免鉴权）
+- 实时通道：`WS /ws/chat?ticket=<一次性票据>`
+- 身份来源：调用 `tf-user` 校验登录 token，聊天侧统一映射为 `u<accountId>`
+- 数据中心：MySQL 存消息/群组/已读位点；Redis 存在线状态、离线私聊、限流、鉴权缓存、WS 票据与 Pub/Sub
+
+> 玩法、命令与常见问题：[docs/聊天玩法.md](docs/聊天玩法.md)
+
+## 鉴权模型
+
+REST 与 WebSocket 都不接受客户端自报身份，昵称与角色始终来自用户服务。
+
+```text
+浏览器 ── Authorization: Bearer <token> ──> tf-chat REST
+   │                                          └─ GET tf-user/api/v1/user/auth/me
+   │                                             结果缓存 tf:chat:auth:<sha256(token)> 60s
+   └─ POST /api/v1/chat/ws-ticket ──> {ticket, expiresIn}
+        └─ WS /ws/chat?ticket=<ticket>（GETDEL 一次性消费，60s 过期）
+```
+
+- REST 缺少或无效 token：`401 {"error":"UNAUTHORIZED"}`；用户服务不可用：`503 {"error":"CHAT_UNAVAILABLE"}`，不做匿名降级。
+- WebSocket 握手无 ticket 或 ticket 已消费：拒绝连接。
+- 长期 token 不进入 URL 与访问日志；重连时前端重新申请 ticket。
 
 ## API 一览
 
+除健康检查外均需 `Authorization: Bearer <token>`。
+
 | 方法/路径 | 说明 |
 |---|---|
-| `GET /api/v1/chat/groups` | 群组列表 + 在线人数 |
-| `GET /api/v1/chat/groups/{id}/history?limit=20` | 群组最近消息 |
-| `GET /api/v1/chat/groups/{id}/members` | 群组在线成员 |
-| `GET /api/v1/chat/dm/{peerUserId}/history?userId=&limit=50` | 私聊历史 |
-| `WS /ws/chat` | 实时消息，协议见 `api/openapi.yaml` |
+| `GET /api/v1/chat/groups` | 群组列表 + 在线人数 + 当前用户未读数 |
+| `GET /api/v1/chat/groups/{id}/history?limit=&beforeSeq=&afterSeq=` | 群历史游标分页 |
+| `GET /api/v1/chat/groups/{id}/search?q=&limit=` | 群内搜索（最近结果，升序返回） |
+| `GET /api/v1/chat/groups/{id}/members` | 群内在线成员 |
+| `GET /api/v1/chat/online` | 全局在线成员 |
+| `GET /api/v1/chat/dm/{peerUserId}/history?limit=&beforeSeq=&afterSeq=` | 私聊历史（viewer 来自 token） |
+| `GET /api/v1/chat/dm/{peerUserId}/search?q=&limit=` | 私聊搜索 |
+| `GET /api/v1/chat/unread` | `{groups:{gid:count}, dms:{peerId:count}, total}` |
+| `POST /api/v1/chat/read` | `{groupId?, peerUserId?, seq?}` 标记已读，`204` |
+| `POST /api/v1/chat/messages/{messageId}/recall` | 撤回自己窗口内的消息 |
+| `POST /api/v1/chat/ws-ticket` | 申请一次性 WebSocket ticket |
 
-## 终端命令映射（前端 TerminalChat）
+分页约定：
 
-`ls /opt/chat/group`、`cd <group>`、`echo "<msg>" >> chat.log`、`tail -n 20 chat.log`、
-`tail -f chat.log`、`ps aux | grep dev`、`ssh <nickname>[@node-xx]`、
-`cat ascii/funny.cat`、`pwd`、`clear`、`help`、`exit`。
+- `limit` 默认群聊 20、私聊 50，服务端上限 200（搜索上限 100）。
+- `beforeSeq`：向上翻页，返回该游标之前最近的一页。
+- `afterSeq`：断线补消息，返回该游标之后的消息。
+- 两者不能同时使用；响应 `{messages, hasMore, nextBeforeSeq}`，`messages` 按 `seq` 升序。
+
+`ChatMessage` 字段：`id`（UUID）、`seq`（全局递增游标）、`groupId`、`fromUserId`、`fromNickname`、`fromNode`、`toUserId`、`content`、`kind`（`text` / `ascii`）、`ts`、`clientMsgId`、`recalled`。
+
+## WebSocket 协议
+
+连接：`GET /ws/chat?ticket=<ticket>`（`ticket` 由 REST 申请）。
+
+客户端帧：
+
+```json
+{"type":"ping","ts":1700000000000}
+{"type":"join","groupId":"dev-group"}
+{"type":"message","content":"hello","kind":"text","clientMsgId":"c-1"}
+{"type":"dm","toUserId":"u9","content":"hi","kind":"text","clientMsgId":"c-2"}
+{"type":"read","groupId":"dev-group","seq":42}
+{"type":"read","peerUserId":"u9","seq":17}
+{"type":"recall","messageId":"<uuid>"}
+{"type":"leave"}
+```
+
+服务端帧：
+
+| type | 说明 |
+|---|---|
+| `ready` | 连接就绪，`{user:{id,nickname,node}, serverTime}`，身份来自 ticket |
+| `presence` | 群内在线成员变化（加入群或广播） |
+| `message` | 群消息 |
+| `dm` | 私聊（接收方经 Redis relay，发送方由服务端回显） |
+| `dm_offline` | 连接建立时补发的离线私聊，`{messages:[...]}` |
+| `recalled` | 撤回通知，`{message, byUserId}` |
+| `pong` | 心跳回包 |
+| `error` | `{code, message}`，见下表 |
+| `left` | 离开当前群组 |
+
+错误码：`BAD_REQUEST`、`UNAUTHORIZED`、`UNKNOWN_TYPE`、`NOT_FOUND`、`RATE_LIMITED`、`CHAT_UNAVAILABLE`、`INTERNAL_ERROR`。处理出错时发送 `error` 帧，不主动断开连接（建连阶段失败除外）。
+
+## 消息语义
+
+- **幂等发送**：`(from_user_id, client_msg_id)` 唯一键；同一客户端消息重复发送返回已存在记录，不重复落库/广播。
+- **限流**：Redis `tf:chat:rate:<userId>:<10s窗口>`，默认 20 条/10 秒；超频发送时 WS 返回 `RATE_LIMITED` 错误帧（当前仅 WS 提供发送入口）。
+- **内容清理**：去除 C0/C1 控制字符与 bidi 控制字符（保留 `\n`、`\t`），客户端写终端前再次清理，避免 ANSI 注入。
+- **撤回**：仅发送者本人、默认 120 秒窗口内可撤回；记录保留，内容清空并标记 `recalled=true`，历史返回撤回占位。
+- **未读**：`chat_read_state` 按 `(user_id, conversation_id)` 保存 `last_read_seq`；打开会话 / `tail -f` 时上报已读。
+- **在线状态**：Redis ZSET score 为过期时间，心跳续期；断线不直接删除全局在线键，靠 60 秒 TTL 自然过期。
+- **离线私聊**：接收者不在线时写入 `tf:chat:offline:<userId>`，重连后 `RENAME` 到临时键再读取补发，避免丢消息。
+
+## 数据库
+
+默认库 `fm_chat`（测试 `fm_test_chat`），启动时执行 `src/main/resources/schema.sql`（幂等建表）：
+
+| 表 | 用途 |
+|---|---|
+| `chat_group` | 群组目录，启动时幂等写入 `dev-group`（研发协作）/ `ops-oncall`（运维值班）/ `tech-share`（技术分享） |
+| `chat_message` | 消息主表，`seq` 自增游标；唯一键 `message_id`、`(from_user_id, client_msg_id)` |
+| `chat_read_state` | 每个用户在每个会话的已读位点 |
+
+会话 ID：群聊 `group:<gid>`，私聊 `dm:<较小userId>:<较大userId>`。
 
 ## Redis 键
 
 | 键 | 用途 |
 |---|---|
-| `tf:chat:groups` | 群组 Hash |
-| `tf:chat:history:<groupId>` | 群聊历史 Stream（MAXLEN ≈ 1000） |
-| `tf:chat:dm:<a>:<b>` | 私聊历史 Stream |
-| `tf:chat:offline:<userId>` | 离线私聊 Stream，连接后 drain |
-| `tf:chat:online` + `tf:chat:online:meta` | 全局在线状态（ZSET + Hash） |
-| `tf:chat:presence:<groupId>` + `tf:chat:presence:meta:<groupId>` | 群组在线成员 |
-| `tf:chat:events` | Pub/Sub 广播频道 |
+| `tf:chat:auth:<sha256(token)>` | 用户服务鉴权结果缓存，TTL 60s |
+| `tf:chat:ws-ticket:<ticket>` | 一次性 WS 握手票据，TTL 60s，GETDEL |
+| `tf:chat:rate:<userId>:<窗口>` | 发送限流计数 |
+| `tf:chat:offline:<userId>` | 离线私聊 Stream；重连后改名到临时键读取补发 |
+| `tf:chat:online` + `tf:chat:online:meta` | 全局在线（ZSET + Hash） |
+| `tf:chat:presence:<groupId>` + `tf:chat:presence:meta:<groupId>` | 群内在线成员 |
+| `tf:chat:events` | Pub/Sub 实时广播频道 |
+
+> 旧版 Redis Stream 历史（`tf:chat:history:*`、`tf:chat:dm:*`）不再写入，历史以 MySQL 为准。
 
 ## 环境变量
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `REDIS_HOST` / `REDIS_PORT` | `10.28.25.234` / `6379` | Redis |
-| `CHAT_RELAY_ENABLED` | `true` | Redis Pub/Sub relay；测试关闭 |
+| `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_DB` | `10.28.13.214` / `3306` / `fm_chat` | MySQL |
+| `MYSQL_APP_USER` / `MYSQL_APP_PASSWORD` | `fm_app` / — | 数据库账号（密码由容器环境注入） |
+| `REDIS_HOST` / `REDIS_PORT` / `REDIS_DATABASE` | `10.28.13.214` / `6379` / `0` | Redis |
+| `SQL_INIT_MODE` | `always` | 启动建表（幂等） |
+| `TF_USER_URL` | `http://127.0.0.1:8101` | 用户服务地址，容器内为 `http://user:8101` |
+| `CHAT_WS_TICKET_TTL_SECONDS` | `60` | WS 票据有效期 |
+| `CHAT_AUTH_CACHE_TTL_SECONDS` | `60` | 鉴权结果缓存 |
+| `CHAT_RECALL_WINDOW_SECONDS` | `120` | 撤回时间窗口 |
+| `CHAT_RATE_LIMIT_PER_10S` | `20` | 每 10 秒发送上限 |
+| `CHAT_ALLOWED_ORIGINS` | `*` | WS 允许来源（逗号分隔） |
+| `CHAT_RELAY_ENABLED` | `true` | Redis Pub/Sub relay；单实例测试可关 |
 | `CHAT_PRESENCE_TTL_MS` | `60000` | 在线状态过期时间（心跳 25s） |
-| `NACOS_ADDR` / `NACOS_USERNAME` / `NACOS_PASSWORD` | — | 服务注册 |
+| `NACOS_ADDR` / `NACOS_NAMESPACE` / `NACOS_USERNAME` / `NACOS_PASSWORD` | — | 服务注册与配置 |
 
 ## 本地开发
 
 ```bash
-mvn spring-boot:run    # 启动开发服务
-mvn -B test            # 运行测试（不依赖 MySQL/Redis/Nacos）
+mvn spring-boot:run    # 启动开发服务（需本机 MySQL/Redis/用户服务，或改用测试配置）
+mvn -B test            # 单元/切片测试，H2 + Mock，不依赖 MySQL/Redis/Nacos
 ```
 
-> Redis 不可用时服务仍可启动，REST 返回 503、WebSocket 拒绝连接并在前端重连；
-> relay 每 15 秒自动重试，Redis 恢复后无需重启服务。
+- 测试使用 H2 MySQL 模式与 `schema-h2.sql`，`src/test/resources/application.yml` 关闭 Nacos 与 relay。
+- Redis 不可用时服务仍可启动：REST 返回 503，WebSocket 拒绝连接并由前端重连；relay 每 15 秒自动重试，Redis 恢复后无需重启。
+- MySQL 不可用时 `/api/v1/chat/**` 返回 503 `CHAT_UNAVAILABLE`。
 
 ## 构建
 
@@ -61,6 +157,14 @@ mvn -B test            # 运行测试（不依赖 MySQL/Redis/Nacos）
 mvn -B -DskipTests package   # 产物 target/tf-chat.jar
 java -jar target/tf-chat.jar
 ```
+
+## 终端命令映射（前端）
+
+进入群组或私聊后直接输入内容并回车即发送，当前会话的新消息自动实时输出。
+连接操作：`cd <group>` 切换群组、`ssh <nickname>[@node-xx]` 发起私聊、`exit` 退出私聊。
+辅助命令：`ls`、`tail -n 50 chat.log`、`ps aux | grep dev`、`who`、`grep <keyword>`、
+`recall #<短ID>`、`cat ascii/funny.cat`、`pwd`、`clear`、`help`。
+旧写法 `echo "<msg>" >> chat.log` 仍兼容。
 
 ## 分支模型
 

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fishmatrix.chat.model.ChatEvent;
 import com.fishmatrix.chat.ws.ChatSessionRegistry;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,10 +46,24 @@ public class ChatRedisRelay implements MessageListener {
                                         "type", "presence",
                                         "groupId", event.target(),
                                         "members", event.members())));
+                case "recalled" -> {
+                    List<com.fishmatrix.chat.ws.ChatSession> targets =
+                            event.message() != null && event.message().groupId() != null
+                                    ? registry.byGroup(event.target())
+                                    : registry.byUser(event.target());
+                    targets.forEach(session -> registry.send(
+                            session,
+                            Map.of(
+                                    "type", "recalled",
+                                    "message", event.message(),
+                                    "byUserId", event.message() == null
+                                            ? ""
+                                            : event.message().fromUserId())));
+                }
                 default -> log.debug("忽略未知聊天事件: {}", event.type());
             }
-        } catch (Exception e) {
-            log.warn("处理 Redis 聊天事件失败: {}", e.getMessage());
+        } catch (Exception exception) {
+            log.warn("处理 Redis 聊天事件失败: {}", exception.getMessage());
         }
     }
 }

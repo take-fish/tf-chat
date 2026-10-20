@@ -1,0 +1,6 @@
+# 仅在 nacos profile 激活时加载：从 Nacos Config 获取 tf-chat.yaml（group=FM）。
+# 生产/测试容器由 compose 注入 SPRING_PROFILES_ACTIVE=nacos；
+# 本地运行与单元测试默认不激活，因此不依赖 Nacos 也能启动。
+spring:
+  config:
+    import: optional:nacos:${spring.application.name}.yaml?group=FM&refreshEnabled=true
