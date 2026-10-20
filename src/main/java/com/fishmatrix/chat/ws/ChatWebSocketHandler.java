@@ -1,12 +1,12 @@
 package com.fishmatrix.chat.ws;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fishmatrix.chat.model.ChatException;
+import com.fishmatrix.chat.model.ChatIdentity;
 import com.fishmatrix.chat.model.ChatMessage;
 import com.fishmatrix.chat.model.ChatUser;
 import com.fishmatrix.chat.model.OnlineMember;
 import com.fishmatrix.chat.service.ChatService;
-import java.net.URLDecoder;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
@@ -17,10 +17,11 @@ import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
-import org.springframework.web.util.UriComponentsBuilder;
 
 @Component
 public class ChatWebSocketHandler extends TextWebSocketHandler {
+
+    public static final String ATTR_IDENTITY = "chat.identity";
 
     private static final Logger log = LoggerFactory.getLogger(ChatWebSocketHandler.class);
 
@@ -39,32 +40,36 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
-        Map<String, String> query = queryOf(session);
-        String userId = query.get("userId");
-        String rawNickname = query.get("nickname");
+        ChatIdentity identity = identityOf(session);
+        if (identity == null) {
+            closeQuietly(session, CloseStatus.POLICY_VIOLATION);
+            return;
+        }
         try {
-            ChatService.requireUserId(userId);
-            String nickname = chatService.normalizeNickname(rawNickname);
-            chatService.connect(userId, nickname);
-            ChatSession chatSession = registry.register(session, userId, nickname);
+            chatService.connect(identity);
+            ChatSession chatSession = registry.register(
+                    session, identity.userId(), identity.nickname());
             registry.send(
                     chatSession,
                     Map.of(
                             "type",
                             "ready",
                             "user",
-                            new ChatUser(userId, nickname, chatSession.getNode()),
+                            new ChatUser(
+                                    identity.userId(),
+                                    identity.nickname(),
+                                    chatSession.getNode()),
                             "serverTime",
                             System.currentTimeMillis()));
-            List<ChatMessage> offline = chatService.drainOffline(userId);
+            List<ChatMessage> offline = chatService.drainOffline(identity);
             if (!offline.isEmpty()) {
                 registry.send(chatSession, Map.of("type", "dm_offline", "messages", offline));
             }
-            log.info("聊天连接建立: {} ({})", nickname, userId);
-        } catch (IllegalArgumentException e) {
-            sendError(session, "INVALID_USER", e.getMessage());
+            log.info("聊天连接建立: {} ({})", identity.nickname(), identity.userId());
+        } catch (ChatException exception) {
+            sendError(session, exception.getCode(), exception.getMessage());
             closeQuietly(session, CloseStatus.BAD_DATA);
-        } catch (DataAccessException e) {
+        } catch (DataAccessException exception) {
             sendError(session, "CHAT_UNAVAILABLE", "消息通道暂不可用");
             closeQuietly(session, CloseStatus.SERVER_ERROR);
         }
@@ -85,20 +90,24 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 case "message" -> handleGroupMessage(chatSession, inbound);
                 case "dm" -> handleDirectMessage(chatSession, inbound);
                 case "leave" -> handleLeave(chatSession);
+                case "read" -> handleRead(chatSession, inbound);
+                case "recall" -> handleRecall(chatSession, inbound);
                 default -> sendError(chatSession, "UNKNOWN_TYPE", "不支持的消息类型");
             }
-        } catch (IllegalArgumentException e) {
-            sendError(chatSession, "BAD_REQUEST", e.getMessage());
-        } catch (DataAccessException e) {
+        } catch (ChatException exception) {
+            sendError(chatSession, exception.getCode(), exception.getMessage());
+        } catch (IllegalArgumentException exception) {
+            sendError(chatSession, "BAD_REQUEST", exception.getMessage());
+        } catch (DataAccessException exception) {
             sendError(chatSession, "CHAT_UNAVAILABLE", "消息通道暂不可用");
-        } catch (Exception e) {
-            log.warn("处理 WebSocket 消息失败", e);
+        } catch (Exception exception) {
+            log.warn("处理 WebSocket 消息失败", exception);
             sendError(chatSession, "INTERNAL_ERROR", "消息处理失败");
         }
     }
 
     private void handlePing(ChatSession session, WsInbound inbound) {
-        chatService.heartbeat(session.getUserId(), session.getNickname(), session.getGroupId());
+        chatService.heartbeat(identityOf(session), session.getGroupId());
         long ts = inbound.ts() == null ? System.currentTimeMillis() : inbound.ts();
         registry.send(session, Map.of("type", "pong", "ts", ts));
     }
@@ -111,7 +120,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
             chatService.leaveGroup(previous, session.getUserId());
         }
         session.setGroupId(groupId);
-        chatService.joinGroup(groupId, session.getUserId(), session.getNickname());
+        chatService.joinGroup(identityOf(session), groupId);
         List<OnlineMember> members = chatService.members(groupId);
         registry.send(
                 session,
@@ -124,9 +133,8 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
             throw new IllegalArgumentException("请先加入会话组");
         }
         chatService.sendGroupMessage(
+                identityOf(session),
                 groupId,
-                session.getUserId(),
-                session.getNickname(),
                 inbound.content(),
                 inbound.kind(),
                 inbound.clientMsgId());
@@ -134,14 +142,31 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
 
     private void handleDirectMessage(ChatSession session, WsInbound inbound) {
         ChatMessage message = chatService.sendDirectMessage(
+                identityOf(session),
                 inbound.toUserId(),
-                session.getUserId(),
-                session.getNickname(),
                 inbound.content(),
                 inbound.kind(),
                 inbound.clientMsgId());
         // 接收者通过 Redis relay 收到；发送者在此直接回显
         registry.send(session, Map.of("type", "dm", "message", message));
+    }
+
+    private void handleRead(ChatSession session, WsInbound inbound) {
+        chatService.markRead(
+                identityOf(session),
+                inbound.groupId(),
+                inbound.peerUserId(),
+                inbound.seq());
+    }
+
+    private void handleRecall(ChatSession session, WsInbound inbound) {
+        ChatMessage message = chatService.recall(identityOf(session), inbound.messageId());
+        registry.send(
+                session,
+                Map.of(
+                        "type", "recalled",
+                        "message", message,
+                        "byUserId", session.getUserId()));
     }
 
     private void handleLeave(ChatSession session) {
@@ -179,6 +204,15 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         closeQuietly(session, CloseStatus.SERVER_ERROR);
     }
 
+    private ChatIdentity identityOf(WebSocketSession session) {
+        Object value = session.getAttributes().get(ATTR_IDENTITY);
+        return value instanceof ChatIdentity identity ? identity : null;
+    }
+
+    private ChatIdentity identityOf(ChatSession session) {
+        return identityOf(session.getWebSocketSession());
+    }
+
     private void sendError(ChatSession session, String code, String message) {
         registry.send(
                 session,
@@ -201,27 +235,13 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
-    private Map<String, String> queryOf(WebSocketSession session) {
-        if (session.getUri() == null) {
-            return Map.of();
-        }
-        var params = UriComponentsBuilder.fromUri(session.getUri()).build().getQueryParams();
-        return Map.of(
-                "userId", decode(params.getFirst("userId")),
-                "nickname", decode(params.getFirst("nickname")));
-    }
-
-    private String decode(String value) {
-        if (value == null || value.isEmpty()) {
-            return "";
-        }
-        return URLDecoder.decode(value, StandardCharsets.UTF_8);
-    }
-
     public record WsInbound(
             String type,
             String groupId,
+            String peerUserId,
             String toUserId,
+            String messageId,
+            Long seq,
             String content,
             String kind,
             String clientMsgId,

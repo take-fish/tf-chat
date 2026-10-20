@@ -1,103 +1,544 @@
 openapi: 3.0.3
 info:
   title: tf-chat API
-  version: 0.2.0
+  version: 0.3.0
   description: |
-    FishMatrix 聊天消息服务：群组、历史、在线成员与私聊（服务端中转）。
-    WebSocket `/ws/chat` 承载实时消息，REST 仅用于目录/历史查询。
+    FishMatrix 聊天消息服务：登录态群聊 / 私聊、MySQL 持久化、游标分页、搜索、
+    撤回与未读同步。
+
+    ## 鉴权
+
+    除 `/api/v1/chat/health` 外，所有 REST 接口都需要
+    `Authorization: Bearer <tf-user 会话 token>`。聊天服务会调用用户服务校验 token，
+    并把身份映射为 `u<accountId>`；客户端不能自报 userId / nickname。
+
+    WebSocket 不接收长期 token：先调用 `POST /api/v1/chat/ws-ticket` 获取一次性
+    ticket，再连接 `WS /ws/chat?ticket=<ticket>`。ticket 默认 60 秒过期且只能消费一次。
+
+    ## 错误响应
+
+    非 2xx 响应统一为 `{ "error": "<CODE>", "message": "<说明>" }`。
+    常见状态：`400 BAD_REQUEST`、`401 UNAUTHORIZED`、`403 FORBIDDEN`、
+    `404 NOT_FOUND`、`503 CHAT_UNAVAILABLE`。发送限流通过 WebSocket
+    `RATE_LIMITED` 错误帧表达。
+servers:
+  - url: /api/v1/chat
+    description: 经网关 / nginx 的同源前缀
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: groups
+    description: 群组目录与群内查询
+  - name: direct
+    description: 私聊
+  - name: presence
+    description: 在线状态
+  - name: sync
+    description: 已读与未读
+  - name: messages
+    description: 消息操作
+  - name: realtime
+    description: WebSocket 票据与协议说明
 
 paths:
-  /api/v1/chat/health:
+  /health:
     get:
-      summary: 服务健康检查
+      summary: 服务健康检查（免鉴权）
+      security: []
+      tags: [realtime]
       responses:
         "200":
           description: 服务正常
 
-  /api/v1/chat/groups:
+  /groups:
     get:
-      summary: 群组列表（含在线人数）
+      summary: 群组列表
+      description: 返回群组目录、当前在线人数与当前用户未读数。
+      tags: [groups]
       responses:
         "200":
-          description: |
-            { "groups": [ { "id", "name", "description", "onlineCount" } ] }
+          description: 群组列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [groups]
+                properties:
+                  groups:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ChatGroupView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/Unavailable"
 
-  /api/v1/chat/groups/{groupId}/history:
+  /groups/{groupId}/history:
     get:
-      summary: 群组最近消息
-      parameters:
-        - in: path
-          name: groupId
-          required: true
-          schema: { type: string }
-        - in: query
-          name: limit
-          schema: { type: integer, default: 20, minimum: 1, maximum: 200 }
-      responses:
-        "200":
-          description: '{ "messages": ChatMessage[] }，按时间升序'
-        "400":
-          description: 群组不存在或参数非法
-
-  /api/v1/chat/groups/{groupId}/members:
-    get:
-      summary: 群组在线成员
-      parameters:
-        - in: path
-          name: groupId
-          required: true
-          schema: { type: string }
-      responses:
-        "200":
-          description: '{ "members": OnlineMember[], "count": number }'
-
-  /api/v1/chat/dm/{peerUserId}/history:
-    get:
-      summary: 与指定用户的私聊历史
-      parameters:
-        - in: path
-          name: peerUserId
-          required: true
-          schema: { type: string }
-        - in: query
-          name: userId
-          required: true
-          schema: { type: string }
-        - in: query
-          name: limit
-          schema: { type: integer, default: 50 }
-      responses:
-        "200":
-          description: '{ "messages": ChatMessage[] }'
-
-  /ws/chat:
-    get:
-      summary: 聊天 WebSocket（不在 OpenAPI 运行时暴露，仅作契约说明）
+      summary: 群聊历史（游标分页）
       description: |
-        连接参数：`userId`（[A-Za-z0-9_-]{1,64}）、`nickname`（≤32）。
-        客户端帧：join {groupId} / message {content, kind, clientMsgId?} /
-        dm {toUserId, content, kind, clientMsgId?} / ping {ts} / leave。
-        服务端帧：ready / presence / message / dm / dm_offline / pong / error / left。
+        `beforeSeq` 用于向上翻页，`afterSeq` 用于断线补消息，二者不能同时使用。
+        响应消息按 `seq` 升序排列。
+      tags: [groups]
+      parameters:
+        - $ref: "#/components/parameters/GroupId"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/BeforeSeq"
+        - $ref: "#/components/parameters/AfterSeq"
+      responses:
+        "200":
+          description: 一页消息
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HistoryPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /groups/{groupId}/search:
+    get:
+      summary: 群内搜索
+      description: 按关键字搜索最近消息，结果按 `seq` 升序返回，单次最多 100 条。
+      tags: [groups]
+      parameters:
+        - $ref: "#/components/parameters/GroupId"
+        - $ref: "#/components/parameters/Query"
+        - $ref: "#/components/parameters/SearchLimit"
+      responses:
+        "200":
+          description: 匹配消息
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /groups/{groupId}/members:
+    get:
+      summary: 群内在线成员
+      tags: [groups, presence]
+      parameters:
+        - $ref: "#/components/parameters/GroupId"
+      responses:
+        "200":
+          description: 群内在线成员
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnlineMemberList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /online:
+    get:
+      summary: 全局在线成员
+      tags: [presence]
+      responses:
+        "200":
+          description: 全部在线成员
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnlineMemberList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /dm/{peerUserId}/history:
+    get:
+      summary: 私聊历史
+      description: 当前用户与 `peerUserId` 的会话；viewer 由 token 决定，无需也不能传入自身 userId。
+      tags: [direct]
+      parameters:
+        - $ref: "#/components/parameters/PeerUserId"
+        - $ref: "#/components/parameters/DmLimit"
+        - $ref: "#/components/parameters/BeforeSeq"
+        - $ref: "#/components/parameters/AfterSeq"
+      responses:
+        "200":
+          description: 一页私聊消息
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HistoryPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /dm/{peerUserId}/search:
+    get:
+      summary: 私聊搜索
+      tags: [direct]
+      parameters:
+        - $ref: "#/components/parameters/PeerUserId"
+        - $ref: "#/components/parameters/Query"
+        - $ref: "#/components/parameters/SearchLimit"
+      responses:
+        "200":
+          description: 匹配消息
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /unread:
+    get:
+      summary: 未读摘要
+      description: 群聊与私聊未读数；私聊键为对端 userId。
+      tags: [sync]
+      responses:
+        "200":
+          description: 未读摘要
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnreadSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /read:
+    post:
+      summary: 标记已读
+      description: |
+        必须提供 `groupId` 或 `peerUserId` 之一。`seq` 省略时使用会话最新 seq。
+        位点只增不减。
+      tags: [sync]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReadRequest"
+      responses:
+        "204":
+          description: 已更新
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /messages/{messageId}/recall:
+    post:
+      summary: 撤回消息
+      description: |
+        仅发送者本人可撤回，默认窗口 120 秒（`CHAT_RECALL_WINDOW_SECONDS`）。
+        记录保留，内容清空并标记 `recalled=true`；实时通道广播 `recalled` 帧。
+      tags: [messages]
+      parameters:
+        - in: path
+          name: messageId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: 撤回后的消息
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message]
+                properties:
+                  message:
+                    $ref: "#/components/schemas/ChatMessage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: 非发送者或已超出撤回窗口
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /ws-ticket:
+    post:
+      summary: 申请一次性 WebSocket ticket
+      description: 无请求体。ticket 默认 60 秒有效，握手时 GETDEL 一次性消费。
+      tags: [realtime]
+      responses:
+        "200":
+          description: 新票据
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WsTicket"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+x-websocket:
+  endpoint: /ws/chat
+  query:
+    ticket: 由 `POST /ws-ticket` 获取的一次性票据
+  description: |
+    握手成功后服务端发送 `ready` 帧；身份完全来自 ticket。
+    帧均为 JSON 文本。
+
+    ### 客户端帧
+
+    | type | 字段 | 说明 |
+    |---|---|---|
+    | `ping` | `ts?` | 心跳并续期在线状态 |
+    | `join` | `groupId` | 加入群组 presence |
+    | `message` | `content`, `kind?`, `clientMsgId?` | 向当前群组发消息 |
+    | `dm` | `toUserId`, `content`, `kind?`, `clientMsgId?` | 私聊 |
+    | `read` | `groupId` 或 `peerUserId`, `seq?` | 标记已读 |
+    | `recall` | `messageId` | 撤回 |
+    | `leave` | — | 离开当前群组 |
+
+    ### 服务端帧
+
+    | type | 字段 | 说明 |
+    |---|---|---|
+    | `ready` | `user`, `serverTime` | 连接就绪 |
+    | `presence` | `groupId`, `members` | 群内在线成员变化 |
+    | `message` | `message` | 群消息 |
+    | `dm` | `message` | 私聊（发送方回显 / 接收方 relay） |
+    | `dm_offline` | `messages` | 重连补发的离线私聊 |
+    | `recalled` | `message`, `byUserId` | 撤回通知 |
+    | `pong` | `ts` | 心跳回包 |
+    | `left` | — | 已离开群组 |
+    | `error` | `code`, `message` | 业务错误，见错误码 |
+
+    错误码：`BAD_REQUEST`、`UNAUTHORIZED`、`UNKNOWN_TYPE`、`NOT_FOUND`、
+    `RATE_LIMITED`、`CHAT_UNAVAILABLE`、`INTERNAL_ERROR`。
+
+    幂等：同一发送者重复使用 `clientMsgId` 只落库一次；断线重连后可用
+    `afterSeq` 补拉，再按消息 `id` 去重。
+
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: tf-user 登录会话 token
+
+  parameters:
+    GroupId:
+      in: path
+      name: groupId
+      required: true
+      schema: { type: string, pattern: "^[a-z0-9-]{1,32}$" }
+    PeerUserId:
+      in: path
+      name: peerUserId
+      required: true
+      schema: { type: string, pattern: "^[A-Za-z0-9_-]{1,64}$", example: u9 }
+    Limit:
+      in: query
+      name: limit
+      schema: { type: integer, default: 20, minimum: 1, maximum: 200 }
+    DmLimit:
+      in: query
+      name: limit
+      schema: { type: integer, default: 50, minimum: 1, maximum: 200 }
+    SearchLimit:
+      in: query
+      name: limit
+      schema: { type: integer, default: 50, minimum: 1, maximum: 100 }
+    BeforeSeq:
+      in: query
+      name: beforeSeq
+      description: 返回该 seq 之前最近的一页；与 afterSeq 互斥
+      schema: { type: integer, format: int64, minimum: 0 }
+    AfterSeq:
+      in: query
+      name: afterSeq
+      description: 返回该 seq 之后的消息（断线补拉）；与 beforeSeq 互斥
+      schema: { type: integer, format: int64, minimum: 0 }
+    Query:
+      in: query
+      name: q
+      required: true
+      description: 关键字，服务端截断到 64 字符；`%`、`_` 按普通字符匹配
+      schema: { type: string, minLength: 1, maxLength: 64 }
+
+  responses:
+    BadRequest:
+      description: 参数不合法
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: 缺少或无效的登录 token / 用户已停用
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: UNAUTHORIZED
+            message: 登录已失效，请重新登录
+    NotFound:
+      description: 资源不存在或不可撤回
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unavailable:
+      description: 用户服务或消息存储不可用
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: CHAT_UNAVAILABLE
+            message: 消息通道暂不可用
+
   schemas:
     ChatMessage:
       type: object
+      required:
+        - id
+        - seq
+        - fromUserId
+        - fromNickname
+        - fromNode
+        - content
+        - kind
+        - ts
+        - recalled
       properties:
-        id: { type: string }
-        groupId: { type: string, nullable: true }
-        fromUserId: { type: string }
-        fromNickname: { type: string }
-        fromNode: { type: string, example: dev-node-62 }
-        toUserId: { type: string, nullable: true }
-        content: { type: string }
+        id: { type: string, format: uuid }
+        seq:
+          type: integer
+          format: int64
+          description: 全局递增游标，用于分页与已读位点
+        groupId:
+          type: string
+          nullable: true
+          description: 群消息的群组 ID；私聊为 null
+        fromUserId: { type: string, example: u1 }
+        fromNickname: { type: string, example: 甲 }
+        fromNode: { type: string, example: dev-node-14 }
+        toUserId:
+          type: string
+          nullable: true
+          description: 私聊接收者；群消息为 null
+        content:
+          type: string
+          description: 已清理控制字符；撤回后为空
         kind: { type: string, enum: [text, ascii] }
-        ts: { type: integer, format: int64 }
-        clientMsgId: { type: string, nullable: true }
+        ts:
+          type: integer
+          format: int64
+          description: 创建时间（epoch 毫秒）
+        clientMsgId:
+          type: string
+          nullable: true
+        recalled: { type: boolean }
+
+    ChatGroupView:
+      type: object
+      required: [id, name, description, onlineCount, unread]
+      properties:
+        id: { type: string, example: dev-group }
+        name: { type: string, example: 研发协作 }
+        description: { type: string }
+        onlineCount: { type: integer, minimum: 0 }
+        unread: { type: integer, minimum: 0 }
+
+    HistoryPage:
+      type: object
+      required: [messages, hasMore]
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatMessage"
+        hasMore: { type: boolean }
+        nextBeforeSeq:
+          type: integer
+          format: int64
+          nullable: true
+          description: 继续向上翻页时传给 beforeSeq；无更多消息时为 null
+
+    MessageList:
+      type: object
+      required: [messages]
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatMessage"
+
     OnlineMember:
       type: object
+      required: [userId, nickname, node, joinedAt]
       properties:
-        groupId: { type: string, nullable: true }
-        userId: { type: string }
-        nickname: { type: string }
-        node: { type: string }
+        groupId:
+          type: string
+          nullable: true
+          description: 群内成员为该群 ID；全局在线为 null
+        userId: { type: string, example: u1 }
+        nickname: { type: string, example: 甲 }
+        node: { type: string, example: dev-node-14 }
         joinedAt: { type: integer, format: int64 }
+
+    OnlineMemberList:
+      type: object
+      required: [members, count]
+      properties:
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/OnlineMember"
+        count: { type: integer, minimum: 0 }
+
+    ReadRequest:
+      type: object
+      description: groupId 与 peerUserId 二选一
+      properties:
+        groupId: { type: string, example: dev-group }
+        peerUserId: { type: string, example: u9 }
+        seq:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 省略时取会话最新 seq
+
+    UnreadSummary:
+      type: object
+      required: [groups, dms, total]
+      properties:
+        groups:
+          type: object
+          additionalProperties: { type: integer, minimum: 0 }
+          example: { dev-group: 3, tech-share: 1 }
+        dms:
+          type: object
+          additionalProperties: { type: integer, minimum: 0 }
+          example: { u9: 2 }
+        total: { type: integer, minimum: 0, example: 6 }
+
+    WsTicket:
+      type: object
+      required: [ticket, expiresIn]
+      properties:
+        ticket:
+          type: string
+          description: 一次性握手票据
+        expiresIn:
+          type: integer
+          description: 有效期（秒）
+          example: 60
+
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error: { type: string, example: BAD_REQUEST }
+        message: { type: string, example: 群组不存在或未授权访问 }

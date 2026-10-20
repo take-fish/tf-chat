@@ -1,28 +1,17 @@
 package com.fishmatrix.chat.store;
 
 import com.fishmatrix.chat.model.ChatEvent;
-import com.fishmatrix.chat.model.ChatGroup;
 import com.fishmatrix.chat.model.ChatMessage;
 import com.fishmatrix.chat.model.OnlineMember;
 import java.util.List;
 
+/**
+ * 实时状态存储：在线成员、群内 presence、离线私聊队列与跨节点广播。
+ * 消息历史与已读状态在 MySQL（ChatMessageRepository）。
+ */
 public interface ChatStore {
 
     String EVENTS_CHANNEL = "tf:chat:events";
-
-    void ensureGroups();
-
-    List<ChatGroup> groups();
-
-    boolean groupExists(String groupId);
-
-    ChatMessage appendGroupMessage(String groupId, ChatMessage message);
-
-    List<ChatMessage> groupHistory(String groupId, int limit);
-
-    ChatMessage appendDirectMessage(ChatMessage message);
-
-    List<ChatMessage> directHistory(String userA, String userB, int limit);
 
     void addOfflineMessage(String userId, ChatMessage message);
 
@@ -39,6 +28,8 @@ public interface ChatStore {
     void removePresence(String groupId, String userId);
 
     List<OnlineMember> members(String groupId);
+
+    List<OnlineMember> onlineMembers();
 
     void publish(ChatEvent event);
 }
