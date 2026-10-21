@@ -186,7 +186,10 @@ public class JdbcChatMessageRepository implements ChatMessageRepository {
     public ChatMessage recall(String messageId, String userId, long windowMs) {
         ChatMessage existing = findById(messageId);
         if (existing == null) {
-            throw ChatException.notFound("消息不存在");
+            throw ChatException.notFound("消息不存在或群聊消息不支持撤回");
+        }
+        if (existing.groupId() != null) {
+            throw ChatException.badRequest("群聊为临时会话，不支持撤回");
         }
         if (!existing.fromUserId().equals(userId)) {
             throw ChatException.forbidden("只能撤回自己的消息");
@@ -245,13 +248,12 @@ public class JdbcChatMessageRepository implements ChatMessageRepository {
 
     @Override
     public UnreadSummary unread(String userId) {
+        // 群聊是临时会话，不累计未读；只统计持久化的私聊。
         Map<String, Integer> groupUnread = new LinkedHashMap<>();
-        int total = 0;
         for (ChatGroup group : groups()) {
-            int count = unreadCount(ConversationIds.group(group.id()), userId);
-            groupUnread.put(group.id(), count);
-            total += count;
+            groupUnread.put(group.id(), 0);
         }
+        int total = 0;
 
         Map<String, Integer> dmUnread = new LinkedHashMap<>();
         List<String> conversations = jdbc.queryForList(

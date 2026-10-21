@@ -4,6 +4,7 @@ import com.fishmatrix.chat.config.ChatProperties;
 import com.fishmatrix.chat.model.ChatEvent;
 import com.fishmatrix.chat.model.ChatGroupView;
 import com.fishmatrix.chat.model.ChatIdentity;
+import com.fishmatrix.chat.model.ChatImage;
 import com.fishmatrix.chat.model.ChatMessage;
 import com.fishmatrix.chat.model.OnlineMember;
 import com.fishmatrix.chat.repository.ChatMessageRepository;
@@ -18,6 +19,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
 @Service
 public class ChatService {
@@ -29,16 +31,19 @@ public class ChatService {
 
     private final ChatStore store;
     private final ChatMessageRepository messages;
+    private final ChatImageService images;
     private final ChatRateLimiter rateLimiter;
     private final ChatProperties properties;
 
     public ChatService(
             ChatStore store,
             ChatMessageRepository messages,
+            ChatImageService images,
             ChatRateLimiter rateLimiter,
             ChatProperties properties) {
         this.store = store;
         this.messages = messages;
+        this.images = images;
         this.rateLimiter = rateLimiter;
         this.properties = properties;
     }
@@ -58,7 +63,8 @@ public class ChatService {
     public HistoryPage groupHistory(String groupId, Long beforeSeq, Long afterSeq, int limit) {
         requireGroup(groupId);
         requireCursor(beforeSeq, afterSeq);
-        return messages.groupHistory(groupId, beforeSeq, afterSeq, clamp(limit, 1, 200));
+        // 群聊是临时会话：消息只在在线连接间实时转发，不提供历史。
+        return new HistoryPage(List.of(), false, null);
     }
 
     public HistoryPage directHistory(
@@ -76,7 +82,9 @@ public class ChatService {
 
     public List<ChatMessage> groupSearch(String groupId, String keyword, int limit) {
         requireGroup(groupId);
-        return messages.searchGroup(groupId, requireKeyword(keyword), clamp(limit, 1, 100));
+        requireKeyword(keyword);
+        // 群聊不做持久化，无法回看或搜索。
+        return List.of();
     }
 
     public List<ChatMessage> directSearch(
@@ -107,13 +115,15 @@ public class ChatService {
             String clientMsgId) {
         requireGroup(groupId);
         rateLimiter.acquire(sender.userId());
+        String normalizedKind = normalizeKind(kind);
+        String normalizedContent = ChatMessage.KIND_IMAGE.equals(normalizedKind)
+                ? images.validateGroupDataUrl(content)
+                : normalizeContent(content);
         ChatMessage message = newMessage(
-                sender, groupId, null, content, kind, clientMsgId);
-        SaveResult saved = messages.insertIfAbsent(message);
-        if (saved.created()) {
-            store.publish(ChatEvent.groupMessage(saved.message()));
-        }
-        return saved.message();
+                sender, groupId, null, normalizedContent, normalizedKind, clientMsgId);
+        // 群聊为临时会话：不写 MySQL，只广播给当前在线的群成员。
+        store.publish(ChatEvent.groupMessage(message));
+        return message;
     }
 
     public ChatMessage sendDirectMessage(
@@ -125,8 +135,12 @@ public class ChatService {
         requireUserId(toUserId);
         requireNotSelf(sender, toUserId);
         rateLimiter.acquire(sender.userId());
+        String normalizedKind = normalizeKind(kind);
+        String normalizedContent = ChatMessage.KIND_IMAGE.equals(normalizedKind)
+                ? images.requireOwned(content, sender.userId())
+                : normalizeContent(content);
         ChatMessage message = newMessage(
-                sender, null, toUserId, content, kind, clientMsgId);
+                sender, null, toUserId, normalizedContent, normalizedKind, clientMsgId);
         SaveResult saved = messages.insertIfAbsent(message);
         if (saved.created()) {
             if (store.isOnline(toUserId)) {
@@ -160,10 +174,7 @@ public class ChatService {
     public void markRead(ChatIdentity viewer, String groupId, String peerUserId, Long seq) {
         if (groupId != null) {
             requireGroup(groupId);
-            long target = seq == null
-                    ? messages.latestSeq(ConversationIds.group(groupId))
-                    : Math.max(0L, seq);
-            messages.markRead(viewer.userId(), groupId, null, target);
+            // 群聊不保存历史，也没有跨会话未读，无需记录已读位点。
             return;
         }
         if (peerUserId != null) {
@@ -180,6 +191,14 @@ public class ChatService {
 
     public UnreadSummary unread(ChatIdentity viewer) {
         return messages.unread(viewer.userId());
+    }
+
+    public ChatImage uploadImage(ChatIdentity viewer, MultipartFile file) {
+        return images.upload(viewer, file);
+    }
+
+    public ChatImageService.StoredImage loadImage(ChatIdentity viewer, String imageId) {
+        return images.load(viewer, imageId);
     }
 
     public void connect(ChatIdentity identity) {
@@ -281,6 +300,11 @@ public class ChatService {
             String content,
             String kind,
             String clientMsgId) {
+        String normalizedKind = normalizeKind(kind);
+        // 图片内容可能是 data URL 或图片 ID，已由 ChatImageService 校验，不能再按文本长度清理。
+        String normalizedContent = ChatMessage.KIND_IMAGE.equals(normalizedKind)
+                ? content
+                : normalizeContent(content);
         return new ChatMessage(
                 UUID.randomUUID().toString(),
                 0L,
@@ -289,8 +313,8 @@ public class ChatService {
                 normalizeNickname(sender.nickname()),
                 NodeNames.forUser(sender.userId()),
                 toUserId,
-                normalizeContent(content),
-                normalizeKind(kind),
+                normalizedContent,
+                normalizedKind,
                 System.currentTimeMillis(),
                 normalizeClientMsgId(clientMsgId),
                 false);
@@ -332,9 +356,13 @@ public class ChatService {
     }
 
     private String normalizeKind(String kind) {
-        return ChatMessage.KIND_ASCII.equalsIgnoreCase(kind)
-                ? ChatMessage.KIND_ASCII
-                : ChatMessage.KIND_TEXT;
+        if (ChatMessage.KIND_ASCII.equalsIgnoreCase(kind)) {
+            return ChatMessage.KIND_ASCII;
+        }
+        if (ChatMessage.KIND_IMAGE.equalsIgnoreCase(kind)) {
+            return ChatMessage.KIND_IMAGE;
+        }
+        return ChatMessage.KIND_TEXT;
     }
 
     private String normalizeClientMsgId(String clientMsgId) {

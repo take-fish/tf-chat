@@ -124,21 +124,21 @@ class JdbcChatMessageRepositoryTest {
 
     @Test
     void recallChecksOwnerAndWindow() {
-        ChatMessage own = insert(group("m-1", "要撤回"));
+        ChatMessage own = insert(direct("m-1", "u1", "u2", "要撤回"));
         ChatMessage recalled = repository.recall(own.id(), "u1", 120_000);
 
         assertThat(recalled.recalled()).isTrue();
         assertThat(recalled.content()).isEmpty();
-        assertThat(repository.searchGroup("dev-group", "撤回", 10)).isEmpty();
+        assertThat(repository.searchDirect("u1", "u2", "撤回", 10)).isEmpty();
         assertThat(repository.recall(own.id(), "u1", 120_000).recalled()).isTrue();
 
-        ChatMessage foreign = insert(groupFrom("m-2", "u2", "别人的"));
+        ChatMessage foreign = insert(direct("m-2", "u2", "u1", "别人的"));
         assertThatThrownBy(() -> repository.recall(foreign.id(), "u1", 120_000))
                 .isInstanceOf(ChatException.class)
                 .hasMessageContaining("只能撤回自己的消息");
 
         ChatMessage old = insert(new ChatMessage(
-                "m-3", 0, "dev-group", "u1", "甲", "dev-node-01", null,
+                "m-3", 0, null, "u1", "甲", "dev-node-01", "u2",
                 "旧消息", "text", System.currentTimeMillis() - 300_000, null, false));
         assertThatThrownBy(() -> repository.recall(old.id(), "u1", 120_000))
                 .isInstanceOf(ChatException.class)
@@ -156,9 +156,10 @@ class JdbcChatMessageRepositoryTest {
         ChatMessage groupMessage = insert(groupFrom("g-1", "u2", "group hello"));
 
         UnreadSummary before = repository.unread("u1");
-        assertThat(before.groups().get("dev-group")).isEqualTo(1);
+        // 群聊是临时会话，不累计未读
+        assertThat(before.groups().get("dev-group")).isZero();
         assertThat(before.dms().get("u2")).isEqualTo(1);
-        assertThat(before.total()).isEqualTo(2);
+        assertThat(before.total()).isEqualTo(1);
 
         repository.markRead("u1", "dev-group", null, groupMessage.seq());
         repository.markRead("u1", null, "u2", incoming.seq());

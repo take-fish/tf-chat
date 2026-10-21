@@ -1,12 +1,13 @@
 # tf-chat
 
-FishMatrix（摸鱼矩阵）聊天消息服务：登录态群聊 / 私聊、消息持久化、游标分页、搜索、撤回与未读同步 —— Spring Boot 3 + JDK 17。
+FishMatrix（摸鱼矩阵）聊天消息服务：登录态私聊持久化与群聊临时会话、图片发送、游标分页、搜索、撤回与未读同步 —— Spring Boot 3 + JDK 17。
 
 - 端口：`8102`
 - 健康检查：`GET /actuator/health`、`GET /api/v1/chat/health`（免鉴权）
 - 实时通道：`WS /ws/chat?ticket=<一次性票据>`
 - 身份来源：调用 `tf-user` 校验登录 token，聊天侧统一映射为 `u<accountId>`
-- 数据中心：MySQL 存消息/群组/已读位点；Redis 存在线状态、离线私聊、限流、鉴权缓存、WS 票据与 Pub/Sub
+- 数据中心：MySQL 存私聊消息/群组/已读位点/图片元数据；图片文件存 `CHAT_IMAGE_DIR`；Redis 存在线状态、离线私聊、限流、鉴权缓存、WS 票据与 Pub/Sub
+- 群聊是临时会话：消息与图片不落库、不落盘，只实时广播
 
 > 玩法、命令与常见问题：[docs/聊天玩法.md](docs/聊天玩法.md)
 
@@ -32,26 +33,34 @@ REST 与 WebSocket 都不接受客户端自报身份，昵称与角色始终来�
 
 | 方法/路径 | 说明 |
 |---|---|
-| `GET /api/v1/chat/groups` | 群组列表 + 在线人数 + 当前用户未读数 |
-| `GET /api/v1/chat/groups/{id}/history?limit=&beforeSeq=&afterSeq=` | 群历史游标分页 |
-| `GET /api/v1/chat/groups/{id}/search?q=&limit=` | 群内搜索（最近结果，升序返回） |
+| `GET /api/v1/chat/groups` | 群组列表 + 在线人数（群未读恒为 0） |
+| `GET /api/v1/chat/groups/{id}/history?limit=&beforeSeq=&afterSeq=` | 群聊临时会话，固定返回空页 |
+| `GET /api/v1/chat/groups/{id}/search?q=&limit=` | 群聊不持久化，固定返回空列表 |
 | `GET /api/v1/chat/groups/{id}/members` | 群内在线成员 |
 | `GET /api/v1/chat/online` | 全局在线成员 |
 | `GET /api/v1/chat/dm/{peerUserId}/history?limit=&beforeSeq=&afterSeq=` | 私聊历史（viewer 来自 token） |
 | `GET /api/v1/chat/dm/{peerUserId}/search?q=&limit=` | 私聊搜索 |
-| `GET /api/v1/chat/unread` | `{groups:{gid:count}, dms:{peerId:count}, total}` |
-| `POST /api/v1/chat/read` | `{groupId?, peerUserId?, seq?}` 标记已读，`204` |
-| `POST /api/v1/chat/messages/{messageId}/recall` | 撤回自己窗口内的消息 |
+| `GET /api/v1/chat/unread` | `{groups:{gid:0}, dms:{peerId:count}, total}`，total 仅含私聊 |
+| `POST /api/v1/chat/read` | `{groupId?, peerUserId?, seq?}` 标记私聊已读；群聊为 no-op，`204` |
+| `POST /api/v1/chat/messages/{messageId}/recall` | 撤回自己窗口内的私聊消息；群聊不支持 |
 | `POST /api/v1/chat/ws-ticket` | 申请一次性 WebSocket ticket |
+| `POST /api/v1/chat/images` | multipart 字段 `file`，上传私聊图片，返回 `{image}`，`201` |
+| `GET /api/v1/chat/images/{imageId}` | 带鉴权读取私聊图片二进制 |
 
 分页约定：
 
-- `limit` 默认群聊 20、私聊 50，服务端上限 200（搜索上限 100）。
+- `limit` 默认私聊 50，服务端上限 200（搜索上限 100）。
 - `beforeSeq`：向上翻页，返回该游标之前最近的一页。
 - `afterSeq`：断线补消息，返回该游标之后的消息。
 - 两者不能同时使用；响应 `{messages, hasMore, nextBeforeSeq}`，`messages` 按 `seq` 升序。
 
-`ChatMessage` 字段：`id`（UUID）、`seq`（全局递增游标）、`groupId`、`fromUserId`、`fromNickname`、`fromNode`、`toUserId`、`content`、`kind`（`text` / `ascii`）、`ts`、`clientMsgId`、`recalled`。
+`ChatMessage` 字段：`id`（UUID）、`seq`（全局递增游标；群聊临时消息为 0）、`groupId`、`fromUserId`、`fromNickname`、`fromNode`、`toUserId`、`content`、`kind`（`text` / `ascii` / `image`）、`ts`、`clientMsgId`、`recalled`。
+
+图片消息约定：
+
+- 私聊：`content` 为图片 ID（先 `POST /api/v1/chat/images` 上传），消息落库；
+- 群聊：`content` 为 `data:image/...;base64,...`，服务端校验类型与大小后只广播；
+- 前端终端只显示 `[图片] #短ID`，实际图片来自缩略图条 / 鉴权下载。
 
 ## WebSocket 协议
 
@@ -63,7 +72,9 @@ REST 与 WebSocket 都不接受客户端自报身份，昵称与角色始终来�
 {"type":"ping","ts":1700000000000}
 {"type":"join","groupId":"dev-group"}
 {"type":"message","content":"hello","kind":"text","clientMsgId":"c-1"}
-{"type":"dm","toUserId":"u9","content":"hi","kind":"text","clientMsgId":"c-2"}
+{"type":"message","content":"data:image/png;base64,<...>","kind":"image","clientMsgId":"c-2"}
+{"type":"dm","toUserId":"u9","content":"hi","kind":"text","clientMsgId":"c-3"}
+{"type":"dm","toUserId":"u9","content":"<imageId>","kind":"image","clientMsgId":"c-4"}
 {"type":"read","groupId":"dev-group","seq":42}
 {"type":"read","peerUserId":"u9","seq":17}
 {"type":"recall","messageId":"<uuid>"}
@@ -88,11 +99,13 @@ REST 与 WebSocket 都不接受客户端自报身份，昵称与角色始终来�
 
 ## 消息语义
 
-- **幂等发送**：`(from_user_id, client_msg_id)` 唯一键；同一客户端消息重复发送返回已存在记录，不重复落库/广播。
+- **群聊临时会话**：`message` 帧不写 MySQL、不落盘，`seq=0`，只经 Redis Pub/Sub 广播；不提供历史、搜索、未读、撤回。
+- **私聊持久化**：`dm` 帧写 `chat_message`，按 `(from_user_id, client_msg_id)` 幂等；二次连接可通过历史接口回看。
 - **限流**：Redis `tf:chat:rate:<userId>:<10s窗口>`，默认 20 条/10 秒；超频发送时 WS 返回 `RATE_LIMITED` 错误帧（当前仅 WS 提供发送入口）。
-- **内容清理**：去除 C0/C1 控制字符与 bidi 控制字符（保留 `\n`、`\t`），客户端写终端前再次清理，避免 ANSI 注入。
-- **撤回**：仅发送者本人、默认 120 秒窗口内可撤回；记录保留，内容清空并标记 `recalled=true`，历史返回撤回占位。
-- **未读**：`chat_read_state` 按 `(user_id, conversation_id)` 保存 `last_read_seq`；打开会话 / `tail -f` 时上报已读。
+- **内容清理**：去除 C0/C1 控制字符与 bidi 控制字符（保留 `\n`、`\t`），客户端写终端前再次清理，避免 ANSI 注入；图片 data URL / 图片 ID 不做文本清理。
+- **图片**：私聊文件 5MB、群聊 data URL 解码后 1MB；校验 PNG/JPEG/GIF/WebP 魔数。私聊图片仅上传者与该私聊参与者可读取。
+- **撤回**：仅私聊、仅发送者本人、默认 120 秒窗口内可撤回；记录保留，内容清空并标记 `recalled=true`，历史返回撤回占位。
+- **未读**：`chat_read_state` 按 `(user_id, conversation_id)` 保存 `last_read_seq`；仅统计私聊，群聊未读恒为 0。
 - **在线状态**：Redis ZSET score 为过期时间，心跳续期；断线不直接删除全局在线键，靠 60 秒 TTL 自然过期。
 - **离线私聊**：接收者不在线时写入 `tf:chat:offline:<userId>`，重连后 `RENAME` 到临时键再读取补发，避免丢消息。
 
@@ -103,8 +116,9 @@ REST 与 WebSocket 都不接受客户端自报身份，昵称与角色始终来�
 | 表 | 用途 |
 |---|---|
 | `chat_group` | 群组目录，启动时幂等写入 `dev-group`（研发协作）/ `ops-oncall`（运维值班）/ `tech-share`（技术分享） |
-| `chat_message` | 消息主表，`seq` 自增游标；唯一键 `message_id`、`(from_user_id, client_msg_id)` |
-| `chat_read_state` | 每个用户在每个会话的已读位点 |
+| `chat_message` | 私聊消息主表，`seq` 自增游标；唯一键 `message_id`、`(from_user_id, client_msg_id)`；群聊不写入 |
+| `chat_read_state` | 每个用户在每个私聊会话的已读位点 |
+| `chat_image` | 私聊图片元数据：`id`、`owner_user_id`、`content_type`、`size`、`created_at`；文件存 `CHAT_IMAGE_DIR` |
 
 会话 ID：群聊 `group:<gid>`，私聊 `dm:<较小userId>:<较大userId>`。
 
@@ -135,6 +149,9 @@ REST 与 WebSocket 都不接受客户端自报身份，昵称与角色始终来�
 | `CHAT_AUTH_CACHE_TTL_SECONDS` | `60` | 鉴权结果缓存 |
 | `CHAT_RECALL_WINDOW_SECONDS` | `120` | 撤回时间窗口 |
 | `CHAT_RATE_LIMIT_PER_10S` | `20` | 每 10 秒发送上限 |
+| `CHAT_IMAGE_DIR` | `./data/chat-images` | 私聊图片存储目录（容器内 `/app/data/chat-images`，compose 已挂卷） |
+| `CHAT_MAX_IMAGE_BYTES` | `5242880` | 私聊图片上传上限（5MB） |
+| `CHAT_MAX_GROUP_IMAGE_BYTES` | `1048576` | 群聊图片解码后上限（1MB） |
 | `CHAT_ALLOWED_ORIGINS` | `*` | WS 允许来源（逗号分隔） |
 | `CHAT_RELAY_ENABLED` | `true` | Redis Pub/Sub relay；单实例测试可关 |
 | `CHAT_PRESENCE_TTL_MS` | `60000` | 在线状态过期时间（心跳 25s） |

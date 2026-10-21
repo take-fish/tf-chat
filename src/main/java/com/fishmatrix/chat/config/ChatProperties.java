@@ -17,7 +17,10 @@ public record ChatProperties(
         int authCacheTtlSeconds,
         int recallWindowSeconds,
         int rateLimitPer10s,
-        List<String> allowedOrigins) {
+        List<String> allowedOrigins,
+        String imageDir,
+        int maxImageBytes,
+        int maxGroupImageBytes) {
 
     public ChatProperties {
         if (presenceTtlMs <= 0) {
@@ -56,5 +59,14 @@ public record ChatProperties(
         allowedOrigins = allowedOrigins == null || allowedOrigins.isEmpty()
                 ? List.of("*")
                 : List.copyOf(allowedOrigins);
+        if (imageDir == null || imageDir.isBlank()) {
+            imageDir = "./data/chat-images";
+        }
+        if (maxImageBytes <= 0) {
+            maxImageBytes = 5 * 1024 * 1024;
+        }
+        if (maxGroupImageBytes <= 0) {
+            maxGroupImageBytes = 1024 * 1024;
+        }
     }
 }
