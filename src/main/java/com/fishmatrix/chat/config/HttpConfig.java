@@ -9,12 +9,15 @@ import org.springframework.web.client.RestClient;
 @Configuration
 public class HttpConfig {
 
+    /**
+     * 使用 Spring Boot 提供的 Builder，让 tf-common 注册的链路拦截器自动生效。
+     */
     @Bean
-    public RestClient chatUserRestClient(ChatProperties properties) {
+    public RestClient chatUserRestClient(RestClient.Builder builder, ChatProperties properties) {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(Duration.ofSeconds(2));
         factory.setReadTimeout(Duration.ofSeconds(3));
-        return RestClient.builder()
+        return builder
                 .baseUrl(properties.userServiceUrl())
                 .requestFactory(factory)
                 .build();
