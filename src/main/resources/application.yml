@@ -3,6 +3,8 @@ spring:
     enabled: ${SPRING_FLYWAY_ENABLED:false}
   application:
     name: tf-chat
+  lifecycle:
+    timeout-per-shutdown-phase: ${SHUTDOWN_TIMEOUT:20s}
   cloud:
     nacos:
       server-addr: ${NACOS_ADDR:10.28.13.214:8848}
@@ -11,6 +13,9 @@ spring:
         username: ${NACOS_USERNAME:nacos}
         password: ${NACOS_PASSWORD:}
         fail-fast: false
+        metadata:
+          version: ${APP_VERSION:dev}
+          git-commit: ${GIT_COMMIT:unknown}
       config:
         namespace: ${NACOS_NAMESPACE:fm-prod}
         group: FM
@@ -39,6 +44,7 @@ spring:
 
 server:
   port: 8102
+  shutdown: graceful
 
 app:
   chat:
