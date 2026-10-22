@@ -1,6 +1,10 @@
 spring:
+  flyway:
+    enabled: ${SPRING_FLYWAY_ENABLED:false}
   application:
     name: tf-chat
+  lifecycle:
+    timeout-per-shutdown-phase: ${SHUTDOWN_TIMEOUT:20s}
   cloud:
     nacos:
       server-addr: ${NACOS_ADDR:10.28.13.214:8848}
@@ -9,6 +13,9 @@ spring:
         username: ${NACOS_USERNAME:nacos}
         password: ${NACOS_PASSWORD:}
         fail-fast: false
+        metadata:
+          version: ${APP_VERSION:dev}
+          git-commit: ${GIT_COMMIT:unknown}
       config:
         namespace: ${NACOS_NAMESPACE:fm-prod}
         group: FM
@@ -19,11 +26,11 @@ spring:
           enabled: false
   datasource:
     url: jdbc:mysql://${MYSQL_HOST:10.28.13.214}:${MYSQL_PORT:3306}/${MYSQL_DB:fm_chat}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
-    username: ${MYSQL_APP_USER:fm_app}
+    username: ${MYSQL_APP_USER:fm_chat_app}
     password: ${MYSQL_APP_PASSWORD:}
   sql:
     init:
-      mode: ${SQL_INIT_MODE:always}
+      mode: ${SQL_INIT_MODE:never}
       encoding: UTF-8
   servlet:
     multipart:
@@ -37,6 +44,7 @@ spring:
 
 server:
   port: 8102
+  shutdown: graceful
 
 app:
   chat:

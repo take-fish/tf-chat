@@ -24,11 +24,6 @@ class FakeChatMessageRepository implements ChatMessageRepository {
     private long sequence;
 
     @Override
-    public void ensureGroups() {
-        // 内存实现无需初始化
-    }
-
-    @Override
     public List<ChatGroup> groups() {
         return List.copyOf(groups);
     }

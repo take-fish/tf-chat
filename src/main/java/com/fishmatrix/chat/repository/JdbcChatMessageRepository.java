@@ -41,53 +41,14 @@ public class JdbcChatMessageRepository implements ChatMessageRepository {
             rs.getString("client_msg_id"),
             rs.getTimestamp("recalled_at") != null);
 
-    private static final List<ChatGroup> DEFAULT_GROUPS = List.of(
-            new ChatGroup("dev-group", "研发协作", "日常研发、需求联调与代码评审"),
-            new ChatGroup("ops-oncall", "运维值班", "告警、发布与线上故障协同"),
-            new ChatGroup("tech-share", "技术分享", "架构方案与工具链交流"));
-
     private final JdbcTemplate jdbc;
-    private volatile boolean groupsReady;
 
     public JdbcChatMessageRepository(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
     }
 
     @Override
-    public void ensureGroups() {
-        if (groupsReady) {
-            return;
-        }
-        synchronized (this) {
-            if (groupsReady) {
-                return;
-            }
-            Timestamp now = new Timestamp(System.currentTimeMillis());
-            for (int i = 0; i < DEFAULT_GROUPS.size(); i++) {
-                ChatGroup group = DEFAULT_GROUPS.get(i);
-                if (groupRowExists(group.id())) {
-                    continue;
-                }
-                try {
-                    jdbc.update(
-                            "INSERT INTO chat_group (id, name, description, sort_order, created_at) "
-                                    + "VALUES (?, ?, ?, ?, ?)",
-                            group.id(),
-                            group.name(),
-                            group.description(),
-                            i,
-                            now);
-                } catch (DuplicateKeyException ignored) {
-                    // 多节点同时初始化，另一节点已写入
-                }
-            }
-            groupsReady = true;
-        }
-    }
-
-    @Override
     public List<ChatGroup> groups() {
-        ensureGroups();
         return jdbc.query(
                 "SELECT id, name, description FROM chat_group ORDER BY sort_order, id",
                 (rs, index) -> new ChatGroup(
@@ -96,7 +57,6 @@ public class JdbcChatMessageRepository implements ChatMessageRepository {
 
     @Override
     public boolean groupExists(String groupId) {
-        ensureGroups();
         Integer count = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM chat_group WHERE id = ?", Integer.class, groupId);
         return count != null && count > 0;
@@ -353,12 +313,6 @@ public class JdbcChatMessageRepository implements ChatMessageRepository {
                 fromUserId,
                 clientMsgId);
         return messages.isEmpty() ? null : messages.get(0);
-    }
-
-    private boolean groupRowExists(String groupId) {
-        Integer count = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM chat_group WHERE id = ?", Integer.class, groupId);
-        return count != null && count > 0;
     }
 
     private String conversationIdOf(ChatMessage message) {

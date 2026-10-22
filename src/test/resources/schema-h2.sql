@@ -7,6 +7,11 @@ CREATE TABLE IF NOT EXISTS chat_group (
     PRIMARY KEY (id)
 );
 
+MERGE INTO chat_group (id, name, description, sort_order, created_at) KEY (id) VALUES
+    ('dev-group', '研发协作', '日常研发、需求联调与代码评审', 0, CURRENT_TIMESTAMP),
+    ('ops-oncall', '运维值班', '告警、发布与线上故障协同', 1, CURRENT_TIMESTAMP),
+    ('tech-share', '技术分享', '架构方案与工具链交流', 2, CURRENT_TIMESTAMP);
+
 CREATE TABLE IF NOT EXISTS chat_message (
     seq BIGINT NOT NULL AUTO_INCREMENT,
     message_id VARCHAR(36) NOT NULL,
