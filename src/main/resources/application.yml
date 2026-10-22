@@ -66,6 +66,12 @@ app:
     max-group-image-bytes: ${CHAT_MAX_GROUP_IMAGE_BYTES:1048576}
 
 management:
+  tracing:
+    enabled: true
+    sampling:
+      probability: 1.0
+    propagation:
+      type: W3C
   endpoints:
     web:
       exposure:
@@ -73,3 +79,9 @@ management:
   endpoint:
     health:
       show-details: always
+
+fm:
+  common:
+    error:
+      service-unavailable-code: CHAT_UNAVAILABLE
+      service-unavailable-message: 消息通道暂不可用

@@ -42,6 +42,20 @@
     </dependencies>
   </dependencyManagement>
 
+  <repositories>
+    <repository>
+      <id>github</id>
+      <name>GitHub Packages - tf-common</name>
+      <url>https://maven.pkg.github.com/take-fish/tf-common</url>
+      <releases>
+        <enabled>true</enabled>
+      </releases>
+      <snapshots>
+        <enabled>false</enabled>
+      </snapshots>
+    </repository>
+  </repositories>
+
   <dependencies>
     <dependency>
       <groupId>org.springframework.boot</groupId>
@@ -84,6 +98,11 @@
     <dependency>
       <groupId>org.flywaydb</groupId>
       <artifactId>flyway-mysql</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.fishmatrix</groupId>
+      <artifactId>tf-common</artifactId>
+      <version>1.0.2</version>
     </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>

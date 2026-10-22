@@ -12,6 +12,7 @@ concurrency:
 
 permissions:
   contents: read
+  packages: read
 
 jobs:
   build:
@@ -25,6 +26,12 @@ jobs:
           distribution: temurin
           java-version: "17"
           cache: maven
+          server-id: github
+          server-username: GITHUB_ACTOR
+          server-password: GITHUB_TOKEN
 
       - name: Build & Test
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: mvn -B -ntp verify

@@ -3,7 +3,9 @@ package com.fishmatrix.chat.ws;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fishmatrix.chat.util.NodeNames;
+import com.fishmatrix.common.trace.TraceIds;
 import java.io.IOException;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -64,7 +66,7 @@ public class ChatSessionRegistry {
             return;
         }
         try {
-            String body = objectMapper.writeValueAsString(payload);
+            String body = objectMapper.writeValueAsString(stampTrace(payload));
             synchronized (session) {
                 if (session.isOpen()) {
                     session.sendMessage(new TextMessage(body));
@@ -75,5 +77,24 @@ public class ChatSessionRegistry {
         } catch (IOException e) {
             log.debug("WebSocket 发送失败（连接可能已关闭）: {}", e.getMessage());
         }
+    }
+
+    /**
+     * 每个出站帧都带上当前链路 ID，前端可直接展示并用于日志检索。
+     */
+    private Object stampTrace(Object payload) {
+        if (!(payload instanceof Map<?, ?> map) || map.containsKey("traceId")) {
+            return payload;
+        }
+        String traceId = TraceIds.currentTraceId();
+        if (traceId == null || traceId.isBlank()) {
+            return payload;
+        }
+        Map<String, Object> stamped = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : map.entrySet()) {
+            stamped.put(String.valueOf(entry.getKey()), entry.getValue());
+        }
+        stamped.put("traceId", traceId);
+        return stamped;
     }
 }
