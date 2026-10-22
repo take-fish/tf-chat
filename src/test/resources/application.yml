@@ -17,6 +17,8 @@ spring:
       mode: always
       encoding: UTF-8
       schema-locations: classpath:schema-h2.sql
+  flyway:
+    enabled: false
   data:
     redis:
       host: 127.0.0.1
