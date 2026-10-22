@@ -47,6 +47,9 @@ server:
   shutdown: graceful
 
 app:
+  # 运行环境标识：统一 JSON 日志的 env 字段来源；生产/测试栈分别注入 production/test
+  environment: ${APP_ENV:production}
+  version: ${APP_VERSION:dev}
   chat:
     relay-enabled: ${CHAT_RELAY_ENABLED:true}
     presence-ttl-ms: ${CHAT_PRESENCE_TTL_MS:60000}
