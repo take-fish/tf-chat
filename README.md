@@ -111,11 +111,13 @@ REST 与 WebSocket 都不接受客户端自报身份，昵称与角色始终来�
 
 ## 数据库
 
-默认库 `fm_chat`（测试 `fm_test_chat`），启动时执行 `src/main/resources/schema.sql`（幂等建表）：
+默认库 `fm_chat`（测试 `fm_test_chat`）。表结构由 Flyway 管理，业务容器不建表：
+`src/main/resources/db/migration/V1__baseline.sql` 由独立任务 `db-migrate-chat`
+使用迁移账号执行。生产/测试业务容器固定 `SPRING_FLYWAY_ENABLED=false`、`SQL_INIT_MODE=never`。
 
 | 表 | 用途 |
 |---|---|
-| `chat_group` | 群组目录，启动时幂等写入 `dev-group`（研发协作）/ `ops-oncall`（运维值班）/ `tech-share`（技术分享） |
+| `chat_group` | 群组目录，由 `V1__baseline.sql` 写入 `dev-group`（研发协作）/ `ops-oncall`（运维值班）/ `tech-share`（技术分享） |
 | `chat_message` | 私聊消息主表，`seq` 自增游标；唯一键 `message_id`、`(from_user_id, client_msg_id)`；群聊不写入 |
 | `chat_read_state` | 每个用户在每个私聊会话的已读位点 |
 | `chat_image` | 私聊图片元数据：`id`、`owner_user_id`、`content_type`、`size`、`created_at`；文件存 `CHAT_IMAGE_DIR` |
@@ -141,9 +143,10 @@ REST 与 WebSocket 都不接受客户端自报身份，昵称与角色始终来�
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_DB` | `10.28.13.214` / `3306` / `fm_chat` | MySQL |
-| `MYSQL_APP_USER` / `MYSQL_APP_PASSWORD` | `fm_app` / — | 数据库账号（密码由容器环境注入） |
+| `MYSQL_APP_USER` / `MYSQL_APP_PASSWORD` | `fm_chat_app` / — | 运行时账号（仅 DML，密码由容器环境注入） |
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_DATABASE` | `10.28.13.214` / `6379` / `0` | Redis |
-| `SQL_INIT_MODE` | `always` | 启动建表（幂等） |
+| `SQL_INIT_MODE` | `never` | 业务容器不执行 SQL 初始化 |
+| `SPRING_FLYWAY_ENABLED` | `false` | 业务容器不执行迁移，由 `db-migrate-chat` 负责 |
 | `TF_USER_URL` | `http://127.0.0.1:8101` | 用户服务地址，容器内为 `http://user:8101` |
 | `CHAT_WS_TICKET_TTL_SECONDS` | `60` | WS 票据有效期 |
 | `CHAT_AUTH_CACHE_TTL_SECONDS` | `60` | 鉴权结果缓存 |

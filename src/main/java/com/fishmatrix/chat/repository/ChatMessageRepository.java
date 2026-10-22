@@ -7,8 +7,6 @@ import java.util.Map;
 
 public interface ChatMessageRepository {
 
-    void ensureGroups();
-
     List<ChatGroup> groups();
 
     boolean groupExists(String groupId);

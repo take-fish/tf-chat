@@ -31,11 +31,9 @@ class JdbcChatMessageRepositoryTest {
     }
 
     @Test
-    void seedsDefaultGroupsIdempotently() {
+    void readsDefaultGroupsSeededByMigration() {
         assertThat(repository.groups()).extracting("id")
                 .containsExactly("dev-group", "ops-oncall", "tech-share");
-        repository.ensureGroups();
-        repository.ensureGroups();
 
         Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM chat_group", Integer.class);
         assertThat(count).isEqualTo(3);
