@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+  <!-- 统一 JSON 日志：字段、时区、MDC 白名单由 tf-common 维护 -->
+  <include resource="com/fishmatrix/common/fishmatrix-logback-base.xml"/>
+</configuration>

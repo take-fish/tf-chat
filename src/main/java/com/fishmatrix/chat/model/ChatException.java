@@ -1,47 +1,44 @@
 package com.fishmatrix.chat.model;
 
+import com.fishmatrix.common.error.ApiException;
+import com.fishmatrix.common.error.ErrorCodes;
 import org.springframework.http.HttpStatus;
 
 /**
- * 带业务错误码的聊天异常，由 ApiExceptionHandler 映射为稳定的 {error, message} 响应。
+ * 聊天业务异常，继承 tf-common 的统一异常类型，由全局异常处理器输出错误响应。
  */
-public class ChatException extends RuntimeException {
-
-    private final HttpStatus status;
-    private final String code;
+public class ChatException extends ApiException {
 
     public ChatException(HttpStatus status, String code, String message) {
-        super(message);
-        this.status = status;
-        this.code = code;
+        super(status, code, message);
     }
 
     public HttpStatus getStatus() {
-        return status;
+        return status();
     }
 
     public String getCode() {
-        return code;
+        return code();
     }
 
     public static ChatException unauthorized(String message) {
-        return new ChatException(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", message);
+        return new ChatException(HttpStatus.UNAUTHORIZED, ErrorCodes.UNAUTHORIZED, message);
     }
 
     public static ChatException forbidden(String message) {
-        return new ChatException(HttpStatus.FORBIDDEN, "FORBIDDEN", message);
+        return new ChatException(HttpStatus.FORBIDDEN, ErrorCodes.FORBIDDEN, message);
     }
 
     public static ChatException notFound(String message) {
-        return new ChatException(HttpStatus.NOT_FOUND, "NOT_FOUND", message);
+        return new ChatException(HttpStatus.NOT_FOUND, ErrorCodes.NOT_FOUND, message);
     }
 
     public static ChatException badRequest(String message) {
-        return new ChatException(HttpStatus.BAD_REQUEST, "BAD_REQUEST", message);
+        return new ChatException(HttpStatus.BAD_REQUEST, ErrorCodes.BAD_REQUEST, message);
     }
 
     public static ChatException rateLimited(String message) {
-        return new ChatException(HttpStatus.TOO_MANY_REQUESTS, "RATE_LIMITED", message);
+        return new ChatException(HttpStatus.TOO_MANY_REQUESTS, ErrorCodes.RATE_LIMITED, message);
     }
 
     public static ChatException unavailable(String message) {

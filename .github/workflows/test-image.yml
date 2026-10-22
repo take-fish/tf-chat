@@ -32,8 +32,14 @@ jobs:
           distribution: temurin
           java-version: "17"
           cache: maven
+          server-id: github
+          server-username: GITHUB_ACTOR
+          server-password: GITHUB_TOKEN
 
       - name: Build jar
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: mvn -B -ntp -DskipTests package
 
       - uses: docker/setup-buildx-action@v4

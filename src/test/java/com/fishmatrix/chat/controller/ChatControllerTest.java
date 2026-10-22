@@ -1,5 +1,7 @@
 package com.fishmatrix.chat.controller;
 
+import com.fishmatrix.common.autoconfigure.FishCommonProperties;
+import com.fishmatrix.common.error.GlobalExceptionHandler;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -41,7 +43,7 @@ class ChatControllerTest {
         chatService = mock(ChatService.class);
         ticketService = mock(WsTicketService.class);
         mockMvc = MockMvcBuilders.standaloneSetup(new ChatController(chatService, ticketService))
-                .setControllerAdvice(new ApiExceptionHandler())
+                .setControllerAdvice(new GlobalExceptionHandler(new FishCommonProperties()))
                 .build();
     }
 
