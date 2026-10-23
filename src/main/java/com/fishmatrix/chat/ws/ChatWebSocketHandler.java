@@ -7,6 +7,7 @@ import com.fishmatrix.chat.model.ChatMessage;
 import com.fishmatrix.chat.model.ChatUser;
 import com.fishmatrix.chat.model.OnlineMember;
 import com.fishmatrix.chat.service.ChatService;
+import com.fishmatrix.chat.service.SmokeService;
 import com.fishmatrix.common.trace.Traces;
 import io.micrometer.tracing.TraceContext;
 import io.micrometer.tracing.Tracer;
@@ -32,6 +33,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     private static final Logger log = LoggerFactory.getLogger(ChatWebSocketHandler.class);
 
     private final ChatService chatService;
+    private final SmokeService smokeService;
     private final ChatSessionRegistry registry;
     private final ObjectMapper objectMapper;
     private final Tracer tracer;
@@ -39,26 +41,30 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     public ChatWebSocketHandler(
             ChatService chatService,
             ChatSessionRegistry registry,
+            SmokeService smokeService,
             ObjectMapper objectMapper) {
-        this(chatService, registry, objectMapper, (Tracer) null);
+        this(chatService, registry, smokeService, objectMapper, (Tracer) null);
     }
 
     @Autowired
     public ChatWebSocketHandler(
             ChatService chatService,
             ChatSessionRegistry registry,
+            SmokeService smokeService,
             ObjectMapper objectMapper,
             ObjectProvider<Tracer> tracerProvider) {
-        this(chatService, registry, objectMapper, tracerProvider.getIfAvailable());
+        this(chatService, registry, smokeService, objectMapper, tracerProvider.getIfAvailable());
     }
 
     private ChatWebSocketHandler(
             ChatService chatService,
             ChatSessionRegistry registry,
+            SmokeService smokeService,
             ObjectMapper objectMapper,
             Tracer tracer) {
         this.chatService = chatService;
         this.registry = registry;
+        this.smokeService = smokeService;
         this.objectMapper = objectMapper;
         this.tracer = tracer;
     }
@@ -91,6 +97,8 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 if (!offline.isEmpty()) {
                     registry.send(chatSession, Map.of("type", "dm_offline", "messages", offline));
                 }
+                smokeService.sendState(chatSession);
+                smokeService.publishState();
                 log.info("聊天连接建立: {} ({})", identity.nickname(), identity.userId());
             } catch (ChatException exception) {
                 sendError(session, exception.getCode(), exception.getMessage());
@@ -120,6 +128,11 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                     case "leave" -> handleLeave(chatSession);
                     case "read" -> handleRead(chatSession, inbound);
                     case "recall" -> handleRecall(chatSession, inbound);
+                    case "smoke_invite" -> handleSmokeInvite(chatSession, inbound);
+                    case "smoke_accept" -> handleSmokeAccept(chatSession, inbound);
+                    case "smoke_decline" -> handleSmokeDecline(chatSession, inbound);
+                    case "smoke_leave" -> handleSmokeLeave(chatSession);
+                    case "smoke_end" -> handleSmokeEnd(chatSession);
                     default -> sendError(chatSession, "UNKNOWN_TYPE", "不支持的消息类型");
                 }
             } catch (ChatException exception) {
@@ -198,6 +211,36 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                         "byUserId", session.getUserId()));
     }
 
+    private void handleSmokeInvite(ChatSession session, WsInbound inbound) {
+        smokeService.invite(identityOf(session), inbound.toUserId());
+        afterSmokeChange(session);
+    }
+
+    private void handleSmokeAccept(ChatSession session, WsInbound inbound) {
+        smokeService.accept(identityOf(session), inbound.sessionId());
+        afterSmokeChange(session);
+    }
+
+    private void handleSmokeDecline(ChatSession session, WsInbound inbound) {
+        smokeService.decline(identityOf(session), inbound.sessionId());
+        afterSmokeChange(session);
+    }
+
+    private void handleSmokeLeave(ChatSession session) {
+        smokeService.leave(identityOf(session));
+        afterSmokeChange(session);
+    }
+
+    private void handleSmokeEnd(ChatSession session) {
+        smokeService.end(identityOf(session));
+        afterSmokeChange(session);
+    }
+
+    private void afterSmokeChange(ChatSession session) {
+        smokeService.sendState(session);
+        smokeService.publishState();
+    }
+
     private void handleLeave(ChatSession session) {
         String groupId = session.getGroupId();
         if (groupId != null) {
@@ -224,6 +267,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
             }
             if (registry.byUser(chatSession.getUserId()).isEmpty()) {
                 chatService.disconnect(chatSession.getUserId());
+                smokeService.publishState();
             }
             log.info("聊天连接关闭: {} ({})", chatSession.getNickname(), status);
         }
@@ -287,6 +331,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
             String content,
             String kind,
             String clientMsgId,
+            String sessionId,
             Long ts) {
     }
 }

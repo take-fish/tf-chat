@@ -57,6 +57,10 @@ public class ChatSessionRegistry {
                 .toList();
     }
 
+    public List<ChatSession> all() {
+        return List.copyOf(sessions.values());
+    }
+
     public void send(ChatSession session, Object payload) {
         sendRaw(session.getWebSocketSession(), payload);
     }
