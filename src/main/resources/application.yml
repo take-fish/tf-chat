@@ -58,9 +58,7 @@ app:
     offline-limit: 200
     max-content-length: 2000
     max-nickname-length: 32
-    user-service-url: ${TF_USER_URL:http://127.0.0.1:8101}
     ws-ticket-ttl-seconds: ${CHAT_WS_TICKET_TTL_SECONDS:60}
-    auth-cache-ttl-seconds: ${CHAT_AUTH_CACHE_TTL_SECONDS:60}
     recall-window-seconds: ${CHAT_RECALL_WINDOW_SECONDS:120}
     rate-limit-per-10s: ${CHAT_RATE_LIMIT_PER_10S:20}
     allowed-origins: ${CHAT_ALLOWED_ORIGINS:*}
@@ -84,6 +82,15 @@ management:
       show-details: always
 
 fm:
+  auth:
+    enabled: ${FM_AUTH_ENABLED:true}
+    user-service-url: ${TF_USER_URL:http://127.0.0.1:8101}
+    identity-secret: ${FM_IDENTITY_SECRET:}
+    allow-bearer-fallback: ${FM_AUTH_BEARER_FALLBACK:true}
+    cache-ttl: ${FM_AUTH_CACHE_TTL:30s}
+    public-paths:
+      - /api/v1/chat/health
+      - /api/v1/chat/meta
   common:
     error:
       service-unavailable-code: CHAT_UNAVAILABLE

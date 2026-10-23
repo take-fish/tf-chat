@@ -27,5 +27,8 @@ spring:
 app:
   chat:
     relay-enabled: false
-    user-service-url: http://127.0.0.1:9
     image-dir: target/chat-images
+
+fm:
+  auth:
+    enabled: false
