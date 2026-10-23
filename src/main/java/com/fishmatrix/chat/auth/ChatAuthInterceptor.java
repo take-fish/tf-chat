@@ -1,47 +1,29 @@
 package com.fishmatrix.chat.auth;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fishmatrix.chat.model.ChatException;
 import com.fishmatrix.chat.model.ChatIdentity;
+import com.fishmatrix.common.auth.CurrentUser;
+import com.fishmatrix.common.auth.UserContext;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import java.nio.charset.StandardCharsets;
-import java.util.Map;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
+/**
+ * 把 tf-common 已校验的当前用户适配为聊天身份。
+ * 登录校验、签名头与 Bearer 回退统一由 tf-common 完成，聊天模块不再重复实现。
+ */
 @Component
 public class ChatAuthInterceptor implements HandlerInterceptor {
 
     public static final String ATTR_IDENTITY = "chat.identity";
 
-    private final ChatAuthService authService;
-    private final ObjectMapper objectMapper;
-
-    public ChatAuthInterceptor(ChatAuthService authService, ObjectMapper objectMapper) {
-        this.authService = authService;
-        this.objectMapper = objectMapper;
-    }
-
     @Override
     public boolean preHandle(
             HttpServletRequest request,
             HttpServletResponse response,
-            Object handler) throws Exception {
-        try {
-            ChatIdentity identity = authService.require(request.getHeader(HttpHeaders.AUTHORIZATION));
-            request.setAttribute(ATTR_IDENTITY, identity);
-            return true;
-        } catch (ChatException exception) {
-            response.setStatus(exception.getStatus().value());
-            response.setCharacterEncoding(StandardCharsets.UTF_8.name());
-            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-            objectMapper.writeValue(
-                    response.getWriter(),
-                    Map.of("error", exception.getCode(), "message", exception.getMessage()));
-            return false;
-        }
+            Object handler) {
+        CurrentUser user = UserContext.require();
+        request.setAttribute(ATTR_IDENTITY, ChatIdentity.of(user.id(), user.nickname(), user.role()));
+        return true;
     }
 }

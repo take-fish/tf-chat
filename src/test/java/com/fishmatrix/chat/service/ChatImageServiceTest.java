@@ -112,7 +112,7 @@ class ChatImageServiceTest {
     private ChatProperties properties() {
         return new ChatProperties(
                 false, 60_000, 1000, 500, 200, 2000, 32,
-                "http://127.0.0.1:9", 60, 60, 120, 20, List.of("*"),
+                60, 120, 20, List.of("*"),
                 tempDir.toString(), 5 * 1024 * 1024, 1024 * 1024);
     }
 

@@ -12,9 +12,7 @@ public record ChatProperties(
         int offlineLimit,
         int maxContentLength,
         int maxNicknameLength,
-        String userServiceUrl,
         int wsTicketTtlSeconds,
-        int authCacheTtlSeconds,
         int recallWindowSeconds,
         int rateLimitPer10s,
         List<String> allowedOrigins,
@@ -41,14 +39,8 @@ public record ChatProperties(
         if (maxNicknameLength <= 0) {
             maxNicknameLength = 32;
         }
-        if (userServiceUrl == null || userServiceUrl.isBlank()) {
-            userServiceUrl = "http://127.0.0.1:8101";
-        }
         if (wsTicketTtlSeconds <= 0) {
             wsTicketTtlSeconds = 60;
-        }
-        if (authCacheTtlSeconds <= 0) {
-            authCacheTtlSeconds = 60;
         }
         if (recallWindowSeconds <= 0) {
             recallWindowSeconds = 120;

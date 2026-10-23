@@ -5,8 +5,8 @@ FishMatrix（摸鱼矩阵）聊天消息服务：登录态私聊持久化与群�
 - 端口：`8102`
 - 健康检查：`GET /actuator/health`、`GET /api/v1/chat/health`（免鉴权）
 - 实时通道：`WS /ws/chat?ticket=<一次性票据>`
-- 身份来源：调用 `tf-user` 校验登录 token，聊天侧统一映射为 `u<accountId>`
-- 数据中心：MySQL 存私聊消息/群组/已读位点/图片元数据；图片文件存 `CHAT_IMAGE_DIR`；Redis 存在线状态、离线私聊、限流、鉴权缓存、WS 票据与 Pub/Sub
+- 身份来源：`tf-common` 统一校验网关签名身份头（或 Bearer 回退），聊天侧映射为 `u<accountId>`
+- 数据中心：MySQL 存私聊消息/群组/已读位点/图片元数据；图片文件存 `CHAT_IMAGE_DIR`；Redis 存在线状态、离线私聊、限流、WS 票据与 Pub/Sub
 - 群聊是临时会话：消息与图片不落库、不落盘，只实时广播
 
 > 玩法、命令与常见问题：[docs/聊天玩法.md](docs/聊天玩法.md)
@@ -16,14 +16,15 @@ FishMatrix（摸鱼矩阵）聊天消息服务：登录态私聊持久化与群�
 REST 与 WebSocket 都不接受客户端自报身份，昵称与角色始终来自用户服务。
 
 ```text
-浏览器 ── Authorization: Bearer <token> ──> tf-chat REST
-   │                                          └─ GET tf-user/api/v1/user/auth/me
-   │                                             结果缓存 tf:chat:auth:<sha256(token)> 60s
+浏览器 ── Authorization: Bearer <token> ──> tf-gateway
+   │                                            └─ 校验 token，注入 HMAC 签名身份头
+   │                                               └─> tf-chat（tf-common AuthInterceptor）
    └─ POST /api/v1/chat/ws-ticket ──> {ticket, expiresIn}
         └─ WS /ws/chat?ticket=<ticket>（GETDEL 一次性消费，60s 过期）
 ```
 
-- REST 缺少或无效 token：`401 {"error":"UNAUTHORIZED"}`；用户服务不可用：`503 {"error":"CHAT_UNAVAILABLE"}`，不做匿名降级。
+- 身份校验、签名头验证、Bearer 回退与用户快照缓存全部由 `tf-common` 提供，聊天模块不再单独调用用户中台。
+- REST 缺少或无效身份：`401 {"error":"UNAUTHORIZED"}`；用户中台不可用时 `tf-common` 返回 503，不做匿名降级。
 - WebSocket 握手无 ticket 或 ticket 已消费：拒绝连接。
 - 长期 token 不进入 URL 与访问日志；重连时前端重新申请 ticket。
 
@@ -128,7 +129,6 @@ REST 与 WebSocket 都不接受客户端自报身份，昵称与角色始终来�
 
 | 键 | 用途 |
 |---|---|
-| `tf:chat:auth:<sha256(token)>` | 用户服务鉴权结果缓存，TTL 60s |
 | `tf:chat:ws-ticket:<ticket>` | 一次性 WS 握手票据，TTL 60s，GETDEL |
 | `tf:chat:rate:<userId>:<窗口>` | 发送限流计数 |
 | `tf:chat:offline:<userId>` | 离线私聊 Stream；重连后改名到临时键读取补发 |
@@ -147,9 +147,9 @@ REST 与 WebSocket 都不接受客户端自报身份，昵称与角色始终来�
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_DATABASE` | `10.28.13.214` / `6379` / `0` | Redis |
 | `SQL_INIT_MODE` | `never` | 业务容器不执行 SQL 初始化 |
 | `SPRING_FLYWAY_ENABLED` | `false` | 业务容器不执行迁移，由 `db-migrate-chat` 负责 |
-| `TF_USER_URL` | `http://127.0.0.1:8101` | 用户服务地址，容器内为 `http://user:8101` |
+| `TF_USER_URL` | `http://127.0.0.1:8101` | 用户中台地址（Bearer 回退 introspection） |
+| `FM_IDENTITY_SECRET` | 空 | 网关身份签名密钥，须与网关一致 |
 | `CHAT_WS_TICKET_TTL_SECONDS` | `60` | WS 票据有效期 |
-| `CHAT_AUTH_CACHE_TTL_SECONDS` | `60` | 鉴权结果缓存 |
 | `CHAT_RECALL_WINDOW_SECONDS` | `120` | 撤回时间窗口 |
 | `CHAT_RATE_LIMIT_PER_10S` | `20` | 每 10 秒发送上限 |
 | `CHAT_IMAGE_DIR` | `./data/chat-images` | 私聊图片存储目录（容器内 `/app/data/chat-images`，compose 已挂卷） |
