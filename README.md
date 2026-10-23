@@ -79,8 +79,17 @@ REST 与 WebSocket 都不接受客户端自报身份，昵称与角色始终来�
 {"type":"read","groupId":"dev-group","seq":42}
 {"type":"read","peerUserId":"u9","seq":17}
 {"type":"recall","messageId":"<uuid>"}
+{"type":"smoke_invite","toUserId":"u9"}
+{"type":"smoke_accept","sessionId":"<uuid>"}
+{"type":"smoke_decline","sessionId":"<uuid>"}
+{"type":"smoke_leave"}
+{"type":"smoke_end"}
 {"type":"leave"}
 ```
+
+冒烟测试约定：发起人邀请在线用户，对方接受后会话进入 `ACTIVE` 并计入“正在冒烟测试”；
+可以继续邀请多人，由发起人手动结束，参与者也可自行退出。`smoke_state` 为个性化快照，
+连接建立、状态变化、其他节点 Redis 广播后都会推送。
 
 服务端帧：
 
@@ -92,6 +101,7 @@ REST 与 WebSocket 都不接受客户端自报身份，昵称与角色始终来�
 | `dm` | 私聊（接收方经 Redis relay，发送方由服务端回显） |
 | `dm_offline` | 连接建立时补发的离线私聊，`{messages:[...]}` |
 | `recalled` | 撤回通知，`{message, byUserId}` |
+| `smoke_state` | 冒烟测试快照，`{state:{count, smoking, online, invites, mySession}}` |
 | `pong` | 心跳回包 |
 | `error` | `{code, message}`，见下表 |
 | `left` | 离开当前群组 |
@@ -108,6 +118,8 @@ REST 与 WebSocket 都不接受客户端自报身份，昵称与角色始终来�
 - **撤回**：仅私聊、仅发送者本人、默认 120 秒窗口内可撤回；记录保留，内容清空并标记 `recalled=true`，历史返回撤回占位。
 - **未读**：`chat_read_state` 按 `(user_id, conversation_id)` 保存 `last_read_seq`；仅统计私聊，群聊未读恒为 0。
 - **在线状态**：Redis ZSET score 为过期时间，心跳续期；断线不直接删除全局在线键，靠 60 秒 TTL 自然过期。
+- **冒烟测试**：会话存 Redis（TTL 24 小时），只允许邀请聊天在线用户；同一时间只能加入一个进行中的会话，
+  接受一条邀请后其他待处理邀请自动作废；超过 12 小时未变化的会话会被清理。
 - **离线私聊**：接收者不在线时写入 `tf:chat:offline:<userId>`，重连后 `RENAME` 到临时键再读取补发，避免丢消息。
 
 ## 数据库
@@ -134,7 +146,8 @@ REST 与 WebSocket 都不接受客户端自报身份，昵称与角色始终来�
 | `tf:chat:offline:<userId>` | 离线私聊 Stream；重连后改名到临时键读取补发 |
 | `tf:chat:online` + `tf:chat:online:meta` | 全局在线（ZSET + Hash） |
 | `tf:chat:presence:<groupId>` + `tf:chat:presence:meta:<groupId>` | 群内在线成员 |
-| `tf:chat:events` | Pub/Sub 实时广播频道 |
+| `tf:chat:events` | Pub/Sub 实时广播频道（含 `smoke` 状态变更） |
+| `tf:chat:smoke:sessions` | 冒烟测试会话 JSON 列表，TTL 24h |
 
 > 旧版 Redis Stream 历史（`tf:chat:history:*`、`tf:chat:dm:*`）不再写入，历史以 MySQL 为准。
 
