@@ -16,6 +16,7 @@ import com.fishmatrix.chat.model.ChatException;
 import com.fishmatrix.chat.model.ChatIdentity;
 import com.fishmatrix.chat.model.ChatMessage;
 import com.fishmatrix.chat.service.ChatService;
+import com.fishmatrix.chat.service.SmokeService;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -32,6 +33,7 @@ class ChatWebSocketHandlerTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private ChatService chatService;
+    private SmokeService smokeService;
     private ChatSessionRegistry registry;
     private ChatWebSocketHandler handler;
     private WebSocketSession socket;
@@ -40,8 +42,9 @@ class ChatWebSocketHandlerTest {
     @BeforeEach
     void setUp() throws Exception {
         chatService = mock(ChatService.class);
+        smokeService = mock(SmokeService.class);
         registry = new ChatSessionRegistry(objectMapper);
-        handler = new ChatWebSocketHandler(chatService, registry, objectMapper);
+        handler = new ChatWebSocketHandler(chatService, registry, smokeService, objectMapper);
         sent = new ArrayList<>();
         socket = mock(WebSocketSession.class);
         Map<String, Object> attributes = new HashMap<>();
@@ -165,6 +168,31 @@ class ChatWebSocketHandlerTest {
         assertThat(sent).extracting(node -> node.get("code").asText())
                 .containsExactly("UNKNOWN_TYPE", "BAD_REQUEST");
         verify(chatService, never()).sendGroupMessage(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void routesSmokeFramesToSmokeService() throws Exception {
+        registry.register(socket, "u1", "甲");
+
+        handler.handleTextMessage(socket, frame("""
+                {"type":"smoke_invite","toUserId":"u2"}
+                """));
+        handler.handleTextMessage(socket, frame("""
+                {"type":"smoke_accept","sessionId":"s-9"}
+                """));
+        handler.handleTextMessage(socket, frame("""
+                {"type":"smoke_decline","sessionId":"s-9"}
+                """));
+        handler.handleTextMessage(socket, frame("""
+                {"type":"smoke_end"}
+                """));
+
+        verify(smokeService).invite(ALICE, "u2");
+        verify(smokeService).accept(ALICE, "s-9");
+        verify(smokeService).decline(ALICE, "s-9");
+        verify(smokeService).end(ALICE);
+        verify(smokeService, org.mockito.Mockito.times(4)).sendState(any());
+        verify(smokeService, org.mockito.Mockito.times(4)).publishState();
     }
 
     @Test

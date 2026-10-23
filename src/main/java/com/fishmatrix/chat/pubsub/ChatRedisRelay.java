@@ -2,6 +2,7 @@ package com.fishmatrix.chat.pubsub;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fishmatrix.chat.model.ChatEvent;
+import com.fishmatrix.chat.service.SmokeService;
 import com.fishmatrix.chat.ws.ChatSessionRegistry;
 import com.fishmatrix.common.trace.TraceIds;
 import java.nio.charset.StandardCharsets;
@@ -21,10 +22,15 @@ public class ChatRedisRelay implements MessageListener {
 
     private final ChatSessionRegistry registry;
     private final ObjectMapper objectMapper;
+    private final SmokeService smokeService;
 
-    public ChatRedisRelay(ChatSessionRegistry registry, ObjectMapper objectMapper) {
+    public ChatRedisRelay(
+            ChatSessionRegistry registry,
+            ObjectMapper objectMapper,
+            SmokeService smokeService) {
         this.registry = registry;
         this.objectMapper = objectMapper;
+        this.smokeService = smokeService;
     }
 
     @Override
@@ -51,6 +57,7 @@ public class ChatRedisRelay implements MessageListener {
                                             "type", "presence",
                                             "groupId", event.target(),
                                             "members", event.members())));
+                    case "smoke" -> smokeService.broadcastLocal();
                     case "recalled" -> {
                         List<com.fishmatrix.chat.ws.ChatSession> targets =
                                 event.message() != null && event.message().groupId() != null
