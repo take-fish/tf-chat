@@ -28,4 +28,9 @@ public record ChatEvent(
     public static ChatEvent recalled(String target, ChatMessage message) {
         return new ChatEvent("recalled", target, message, null, TraceIds.currentTraceId());
     }
+
+    /** 冒烟测试状态变化：各节点收到后按本地连接重新计算个性化快照。 */
+    public static ChatEvent smoke() {
+        return new ChatEvent("smoke", "*", null, null, TraceIds.currentTraceId());
+    }
 }
