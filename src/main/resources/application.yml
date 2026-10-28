@@ -46,6 +46,15 @@ server:
   port: 8102
   shutdown: graceful
 
+mybatis-plus:
+  mapper-locations: classpath:mapper/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+
 app:
   # 运行环境标识：统一 JSON 日志的 env 字段来源；生产/测试栈分别注入 production/test
   environment: ${APP_ENV:production}

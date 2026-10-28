@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.fishmatrix.chat.mapper.ChatReadStateMapper">
+
+  <select id="selectLastReadSeq" resultType="java.lang.Long">
+    SELECT last_read_seq
+    FROM chat_read_state
+    WHERE user_id = #{userId} AND conversation_id = #{conversationId}
+  </select>
+
+  <update id="updateLastReadSeq">
+    UPDATE chat_read_state
+    SET last_read_seq = GREATEST(last_read_seq, #{seq}),
+        updated_at = #{now}
+    WHERE user_id = #{userId} AND conversation_id = #{conversationId}
+  </update>
+
+  <insert id="insertReadState">
+    INSERT INTO chat_read_state (user_id, conversation_id, last_read_seq, updated_at)
+    VALUES (#{userId}, #{conversationId}, #{seq}, #{now})
+  </insert>
+
+</mapper>

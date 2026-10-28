@@ -2,39 +2,91 @@ package com.fishmatrix.chat.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.fishmatrix.chat.config.ChatProperties;
-import com.fishmatrix.chat.model.ChatException;
+import com.fishmatrix.chat.converter.ChatConverters;
+import com.fishmatrix.chat.entity.ChatMessageEntity;
+import com.fishmatrix.chat.error.ChatException;
+import com.fishmatrix.chat.mapper.ChatGroupMapper;
+import com.fishmatrix.chat.mapper.ChatMessageMapper;
+import com.fishmatrix.chat.mapper.ChatReadStateMapper;
 import com.fishmatrix.chat.model.ChatGroupView;
 import com.fishmatrix.chat.model.ChatIdentity;
 import com.fishmatrix.chat.model.ChatMessage;
+import com.fishmatrix.chat.model.HistoryPage;
 import com.fishmatrix.chat.model.OnlineMember;
-import com.fishmatrix.chat.repository.ChatMessageRepository.HistoryPage;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * ChatService 的行为测试。
+ *
+ * <p>数据访问走真实 MyBatis-Plus + H2（schema-h2.sql），只把 Redis 侧的
+ * ChatStore / ChatRateLimiter 和图片服务换成测试替身，这样游标分页、
+ * 未读统计等 SQL 语义也被覆盖。</p>
+ */
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@Transactional
 class ChatServiceTest {
 
-    private FakeChatStore store;
-    private FakeChatMessageRepository repository;
-    private ChatImageService images;
+    @TestConfiguration
+    static class TestBeans {
+
+        @Bean
+        @Primary
+        FakeChatStore fakeChatStore() {
+            return new FakeChatStore();
+        }
+
+        @Bean
+        @Primary
+        ChatRateLimiter noopRateLimiter() {
+            return userId -> {
+            };
+        }
+    }
+
+    @Autowired
     private ChatService service;
-    private ChatIdentity alice;
-    private ChatIdentity bob;
+
+    @Autowired
+    private FakeChatStore store;
+
+    @Autowired
+    private ChatMessageMapper messageMapper;
+
+    @Autowired
+    private ChatGroupMapper groupMapper;
+
+    @Autowired
+    private ChatReadStateMapper readStateMapper;
+
+    @Autowired
+    private ChatProperties properties;
+
+    @MockitoBean
+    private ChatImageService images;
+
+    private final ChatIdentity alice = ChatIdentity.of(1, "甲", "USER");
+    private final ChatIdentity bob = ChatIdentity.of(2, "乙", "USER");
 
     @BeforeEach
-    void setUp() {
-        store = new FakeChatStore();
-        repository = new FakeChatMessageRepository();
-        images = mock(ChatImageService.class);
-        service = new ChatService(store, repository, images, userId -> { }, properties());
-        alice = ChatIdentity.of(1, "甲", "USER");
-        bob = ChatIdentity.of(2, "乙", "USER");
+    void resetStore() {
+        store.events.clear();
+        store.offline.clear();
+        store.presence.clear();
+        store.online.clear();
     }
 
     @Test
@@ -60,7 +112,7 @@ class ChatServiceTest {
         assertThat(message.fromUserId()).isEqualTo("u1");
         assertThat(message.fromNickname()).isEqualTo("甲");
         assertThat(message.fromNode()).startsWith("dev-node-");
-        assertThat(repository.messages).isEmpty();
+        assertThat(storedMessages()).isEmpty();
         assertThat(store.events).hasSize(1);
         assertThat(store.events.get(0).type()).isEqualTo("message");
         assertThat(store.events.get(0).target()).isEqualTo("dev-group");
@@ -98,7 +150,7 @@ class ChatServiceTest {
 
         assertThat(message.kind()).isEqualTo(ChatMessage.KIND_IMAGE);
         assertThat(message.content()).isEqualTo(dataUrl);
-        assertThat(repository.messages).isEmpty();
+        assertThat(storedMessages()).isEmpty();
         assertThat(store.events).extracting("type").containsExactly("message");
     }
 
@@ -111,7 +163,7 @@ class ChatServiceTest {
                 alice, "dev-group", dataUrl, "image", null);
 
         assertThat(message.content()).isEqualTo(dataUrl);
-        assertThat(repository.messages).isEmpty();
+        assertThat(storedMessages()).isEmpty();
     }
 
     @Test
@@ -122,7 +174,8 @@ class ChatServiceTest {
                 alice, "u2", "看下构建", "text", null);
 
         assertThat(message.toUserId()).isEqualTo("u2");
-        assertThat(repository.messages).containsExactly(message);
+        assertThat(message.seq()).isPositive();
+        assertThat(storedMessages()).containsExactly(message);
         assertThat(store.events).extracting("type").containsExactly("dm");
         assertThat(store.offline).isEmpty();
     }
@@ -135,7 +188,8 @@ class ChatServiceTest {
                 alice, "u2", "hello", "text", "client-1");
 
         assertThat(second.id()).isEqualTo(first.id());
-        assertThat(repository.messages).hasSize(1);
+        assertThat(second.seq()).isEqualTo(first.seq());
+        assertThat(storedMessages()).hasSize(1);
         assertThat(store.offline.get("u2")).hasSize(1);
     }
 
@@ -200,7 +254,7 @@ class ChatServiceTest {
 
         assertThat(message.kind()).isEqualTo(ChatMessage.KIND_IMAGE);
         assertThat(message.content()).isEqualTo("image-1");
-        assertThat(repository.messages).containsExactly(message);
+        assertThat(storedMessages()).containsExactly(message);
     }
 
     @Test
@@ -212,17 +266,15 @@ class ChatServiceTest {
                         alice, "u2", "image-2", "image", null))
                 .isInstanceOf(ChatException.class)
                 .hasMessageContaining("其他账号");
-        assertThat(repository.messages).isEmpty();
+        assertThat(storedMessages()).isEmpty();
     }
 
     @Test
     void recallWindowIsEnforced() {
         ChatMessage old = service.sendDirectMessage(alice, "u2", "旧消息", "text", null);
-        repository.messages.removeIf(message -> message.id().equals(old.id()));
-        repository.insertIfAbsent(new ChatMessage(
-                old.id(), 1, old.groupId(), old.fromUserId(), old.fromNickname(), old.fromNode(),
-                old.toUserId(), old.content(), old.kind(), System.currentTimeMillis() - 300_000,
-                null, false));
+        ChatMessageEntity entity = messageMapper.selectByMessageId(old.id());
+        entity.setCreatedAt(Instant.now().minusSeconds(300));
+        messageMapper.updateById(entity);
 
         assertThatThrownBy(() -> service.recall(alice, old.id()))
                 .isInstanceOf(ChatException.class)
@@ -235,7 +287,7 @@ class ChatServiceTest {
                 .isInstanceOf(ChatException.class)
                 .hasMessageContaining("消息不存在");
         assertThatThrownBy(() -> service.recall(alice, " "))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(ChatException.class)
                 .hasMessageContaining("缺少消息 ID");
     }
 
@@ -262,16 +314,23 @@ class ChatServiceTest {
     @Test
     void contentControlCharactersAreRemoved() {
         ChatMessage message = service.sendDirectMessage(
-                alice, "u2", "[31mred‮text", "text", null);
+                alice, "u2", "[31mred\u202Etext", "text", null);
 
         assertThat(message.content()).isEqualTo("[31mredtext");
     }
 
     @Test
     void rateLimitRejectsExcessMessages() {
-        ChatService limited = new ChatService(store, repository, images, userId -> {
-            throw ChatException.rateLimited("发送过于频繁");
-        }, properties());
+        ChatService limited = new ChatService(
+                store,
+                messageMapper,
+                groupMapper,
+                readStateMapper,
+                images,
+                userId -> {
+                    throw ChatException.rateLimited("发送过于频繁");
+                },
+                properties);
 
         assertThatThrownBy(() -> limited.sendGroupMessage(
                         alice, "dev-group", "hi", "text", null))
@@ -300,39 +359,27 @@ class ChatServiceTest {
     void rejectsInvalidInput() {
         assertThatThrownBy(() -> service.sendGroupMessage(
                         alice, "dev-group", "   ", "text", null))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(ChatException.class)
                 .hasMessageContaining("消息内容");
         assertThatThrownBy(() -> service.groupHistory("missing-group", null, null, 20))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(ChatException.class)
                 .hasMessageContaining("群组");
         assertThatThrownBy(() -> service.sendDirectMessage(
                         alice, "u1", "hi", "text", null))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(ChatException.class)
                 .hasMessageContaining("当前节点");
         assertThatThrownBy(() -> service.groupHistory("dev-group", 10L, 20L, 20))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(ChatException.class)
                 .hasMessageContaining("不能同时使用");
+    }
+
+    private List<ChatMessage> storedMessages() {
+        return messageMapper.selectList(null).stream()
+                .map(ChatConverters::toMessage)
+                .toList();
     }
 
     private static OnlineMember member(String userId, String nickname) {
         return new OnlineMember(null, userId, nickname, "dev-node-01", System.currentTimeMillis());
-    }
-
-    private static ChatProperties properties() {
-        return new ChatProperties(
-                false,
-                60_000,
-                1000,
-                500,
-                200,
-                2000,
-                32,
-                60,
-                120,
-                20,
-                List.of("*"),
-                "target/chat-images",
-                5_242_880,
-                1_048_576);
     }
 }
