@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Range;
 import org.springframework.data.redis.connection.Limit;
 import org.springframework.data.redis.connection.stream.MapRecord;
@@ -22,6 +23,7 @@ import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Repository;
 
 @Repository
+@RequiredArgsConstructor
 public class RedisChatStore implements ChatStore {
 
     private static final String OFFLINE_PREFIX = "tf:chat:offline:";
@@ -33,15 +35,6 @@ public class RedisChatStore implements ChatStore {
     private final StringRedisTemplate redis;
     private final ObjectMapper objectMapper;
     private final ChatProperties properties;
-
-    public RedisChatStore(
-            StringRedisTemplate redis,
-            ObjectMapper objectMapper,
-            ChatProperties properties) {
-        this.redis = redis;
-        this.objectMapper = objectMapper;
-        this.properties = properties;
-    }
 
     @Override
     public void addOfflineMessage(String userId, ChatMessage message) {

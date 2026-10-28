@@ -13,8 +13,7 @@ import io.micrometer.tracing.TraceContext;
 import io.micrometer.tracing.Tracer;
 import java.util.List;
 import java.util.Map;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
@@ -25,12 +24,11 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 @Component
+@Slf4j
 public class ChatWebSocketHandler extends TextWebSocketHandler {
 
     public static final String ATTR_IDENTITY = "chat.identity";
     public static final String ATTR_TRACE_CONTEXT = "chat.traceContext";
-
-    private static final Logger log = LoggerFactory.getLogger(ChatWebSocketHandler.class);
 
     private final ChatService chatService;
     private final SmokeService smokeService;

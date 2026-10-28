@@ -3,11 +3,13 @@ package com.fishmatrix.chat.repository;
 import com.fishmatrix.chat.model.ChatImage;
 import java.sql.Timestamp;
 import java.util.List;
+import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
 @Repository
+@RequiredArgsConstructor
 public class JdbcChatImageRepository implements ChatImageRepository {
 
     private static final RowMapper<ChatImage> MAPPER = (rs, index) -> new ChatImage(
@@ -18,10 +20,6 @@ public class JdbcChatImageRepository implements ChatImageRepository {
             rs.getTimestamp("created_at").getTime());
 
     private final JdbcTemplate jdbc;
-
-    public JdbcChatImageRepository(JdbcTemplate jdbc) {
-        this.jdbc = jdbc;
-    }
 
     @Override
     public ChatImage insert(ChatImage image) {

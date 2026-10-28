@@ -14,8 +14,7 @@ import java.util.Base64;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -24,9 +23,8 @@ import org.springframework.web.multipart.MultipartFile;
  * 群聊图片不经过这里，只在 WebSocket 帧中实时转发。
  */
 @Service
+@Slf4j
 public class ChatImageService {
-
-    private static final Logger log = LoggerFactory.getLogger(ChatImageService.class);
 
     private static final Pattern IMAGE_ID = Pattern.compile("[A-Za-z0-9-]{1,64}");
     private static final Set<String> SUBTYPES = Set.of("png", "jpeg", "gif", "webp");

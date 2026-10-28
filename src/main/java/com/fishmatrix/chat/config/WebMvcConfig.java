@@ -1,19 +1,17 @@
 package com.fishmatrix.chat.config;
 
 import com.fishmatrix.chat.auth.ChatAuthInterceptor;
+import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 @Configuration
+@RequiredArgsConstructor
 public class WebMvcConfig implements WebMvcConfigurer {
 
     private final ChatAuthInterceptor authInterceptor;
-
-    public WebMvcConfig(ChatAuthInterceptor authInterceptor) {
-        this.authInterceptor = authInterceptor;
-    }
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {

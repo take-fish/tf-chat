@@ -6,26 +6,22 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Repository;
 
 @Repository
+@RequiredArgsConstructor
+@Slf4j
 public class RedisSmokeStore implements SmokeStore {
 
-    private static final Logger log = LoggerFactory.getLogger(RedisSmokeStore.class);
     private static final String KEY = "tf:chat:smoke:sessions";
     private static final Duration TTL = Duration.ofHours(24);
     private static final TypeReference<List<SmokeSession>> TYPE = new TypeReference<>() { };
 
     private final StringRedisTemplate redis;
     private final ObjectMapper objectMapper;
-
-    public RedisSmokeStore(StringRedisTemplate redis, ObjectMapper objectMapper) {
-        this.redis = redis;
-        this.objectMapper = objectMapper;
-    }
 
     @Override
     public List<SmokeSession> load() {

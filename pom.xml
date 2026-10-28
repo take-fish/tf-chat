@@ -100,6 +100,11 @@
       <artifactId>flyway-mysql</artifactId>
     </dependency>
     <dependency>
+      <groupId>org.projectlombok</groupId>
+      <artifactId>lombok</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
       <groupId>com.fishmatrix</groupId>
       <artifactId>tf-common</artifactId>
       <version>1.2.0</version>

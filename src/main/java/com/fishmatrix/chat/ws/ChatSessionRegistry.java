@@ -9,23 +9,19 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 
 @Component
+@RequiredArgsConstructor
+@Slf4j
 public class ChatSessionRegistry {
-
-    private static final Logger log = LoggerFactory.getLogger(ChatSessionRegistry.class);
 
     private final Map<String, ChatSession> sessions = new ConcurrentHashMap<>();
     private final ObjectMapper objectMapper;
-
-    public ChatSessionRegistry(ObjectMapper objectMapper) {
-        this.objectMapper = objectMapper;
-    }
 
     public ChatSession register(WebSocketSession webSocketSession, String userId, String nickname) {
         ChatSession session = new ChatSession(

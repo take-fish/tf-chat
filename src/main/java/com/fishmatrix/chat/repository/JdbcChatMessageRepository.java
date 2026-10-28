@@ -12,6 +12,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -20,6 +21,7 @@ import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 
 @Repository
+@RequiredArgsConstructor
 public class JdbcChatMessageRepository implements ChatMessageRepository {
 
     private static final String SELECT_MESSAGE =
@@ -42,10 +44,6 @@ public class JdbcChatMessageRepository implements ChatMessageRepository {
             rs.getTimestamp("recalled_at") != null);
 
     private final JdbcTemplate jdbc;
-
-    public JdbcChatMessageRepository(JdbcTemplate jdbc) {
-        this.jdbc = jdbc;
-    }
 
     @Override
     public List<ChatGroup> groups() {

@@ -18,10 +18,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 @Service
+@RequiredArgsConstructor
 public class ChatService {
 
     private static final Pattern USER_ID = Pattern.compile("[A-Za-z0-9_-]{1,64}");
@@ -34,19 +36,6 @@ public class ChatService {
     private final ChatImageService images;
     private final ChatRateLimiter rateLimiter;
     private final ChatProperties properties;
-
-    public ChatService(
-            ChatStore store,
-            ChatMessageRepository messages,
-            ChatImageService images,
-            ChatRateLimiter rateLimiter,
-            ChatProperties properties) {
-        this.store = store;
-        this.messages = messages;
-        this.images = images;
-        this.rateLimiter = rateLimiter;
-        this.properties = properties;
-    }
 
     public List<ChatGroupView> groups(ChatIdentity viewer) {
         Map<String, Integer> unread = messages.unread(viewer.userId()).groups();

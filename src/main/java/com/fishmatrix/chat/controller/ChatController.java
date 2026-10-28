@@ -16,6 +16,7 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -33,15 +34,11 @@ import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/v1/chat")
+@RequiredArgsConstructor
 public class ChatController {
 
     private final ChatService chatService;
     private final WsTicketService ticketService;
-
-    public ChatController(ChatService chatService, WsTicketService ticketService) {
-        this.chatService = chatService;
-        this.ticketService = ticketService;
-    }
 
     @GetMapping("/groups")
     public Map<String, Object> groups(
