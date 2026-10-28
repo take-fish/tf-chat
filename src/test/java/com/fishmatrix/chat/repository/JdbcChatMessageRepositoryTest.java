@@ -1,9 +1,7 @@
 package com.fishmatrix.chat.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.fishmatrix.chat.model.ChatException;
 import com.fishmatrix.chat.model.ChatMessage;
 import com.fishmatrix.chat.repository.ChatMessageRepository.HistoryPage;
 import com.fishmatrix.chat.repository.ChatMessageRepository.SaveResult;
@@ -121,30 +119,23 @@ class JdbcChatMessageRepositoryTest {
     }
 
     @Test
-    void recallChecksOwnerAndWindow() {
+    void markRecalledClearsContentOnlyOnce() {
         ChatMessage own = insert(direct("m-1", "u1", "u2", "要撤回"));
-        ChatMessage recalled = repository.recall(own.id(), "u1", 120_000);
+        long now = System.currentTimeMillis();
 
+        assertThat(repository.markRecalled(own.id(), "u1", now)).isEqualTo(1);
+        ChatMessage recalled = repository.findById(own.id());
         assertThat(recalled.recalled()).isTrue();
         assertThat(recalled.content()).isEmpty();
         assertThat(repository.searchDirect("u1", "u2", "撤回", 10)).isEmpty();
-        assertThat(repository.recall(own.id(), "u1", 120_000).recalled()).isTrue();
 
-        ChatMessage foreign = insert(direct("m-2", "u2", "u1", "别人的"));
-        assertThatThrownBy(() -> repository.recall(foreign.id(), "u1", 120_000))
-                .isInstanceOf(ChatException.class)
-                .hasMessageContaining("只能撤回自己的消息");
+        // 已撤回的消息不会被重复更新
+        assertThat(repository.markRecalled(own.id(), "u1", now)).isZero();
+    }
 
-        ChatMessage old = insert(new ChatMessage(
-                "m-3", 0, null, "u1", "甲", "dev-node-01", "u2",
-                "旧消息", "text", System.currentTimeMillis() - 300_000, null, false));
-        assertThatThrownBy(() -> repository.recall(old.id(), "u1", 120_000))
-                .isInstanceOf(ChatException.class)
-                .hasMessageContaining("超过撤回时限");
-
-        assertThatThrownBy(() -> repository.recall("missing", "u1", 120_000))
-                .isInstanceOf(ChatException.class)
-                .hasMessageContaining("消息不存在");
+    @Test
+    void findByIdReturnsNullForMissingMessage() {
+        assertThat(repository.findById("missing")).isNull();
     }
 
     @Test

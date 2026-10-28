@@ -24,7 +24,13 @@ public interface ChatMessageRepository {
 
     List<ChatMessage> searchDirect(String userA, String userB, String keyword, int limit);
 
-    ChatMessage recall(String messageId, String userId, long windowMs);
+    ChatMessage findById(String messageId);
+
+    /**
+     * 条件撤回：仅当消息尚未撤回时写入，返回影响行数。
+     * 撤回权限、群聊限制与时限由 Service 判断，仓储只负责持久化。
+     */
+    int markRecalled(String messageId, String userId, long now);
 
     void markRead(String userId, String groupId, String peerUserId, long seq);
 

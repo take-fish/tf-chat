@@ -2,6 +2,7 @@ package com.fishmatrix.chat.service;
 
 import com.fishmatrix.chat.config.ChatProperties;
 import com.fishmatrix.chat.model.ChatEvent;
+import com.fishmatrix.chat.model.ChatException;
 import com.fishmatrix.chat.model.ChatGroupView;
 import com.fishmatrix.chat.model.ChatIdentity;
 import com.fishmatrix.chat.model.ChatImage;
@@ -145,17 +146,31 @@ public class ChatService {
         if (messageId == null || messageId.isBlank()) {
             throw new IllegalArgumentException("缺少消息 ID");
         }
-        ChatMessage message = messages.recall(
-                messageId.strip(),
-                identity.userId(),
-                properties.recallWindowSeconds() * 1000L);
+        String id = messageId.strip();
+        ChatMessage message = messages.findById(id);
+        if (message == null) {
+            throw ChatException.notFound("消息不存在或群聊消息不支持撤回");
+        }
         if (message.groupId() != null) {
-            store.publish(ChatEvent.recalled(message.groupId(), message));
-        } else {
-            store.publish(ChatEvent.recalled(message.fromUserId(), message));
-            if (message.toUserId() != null) {
-                store.publish(ChatEvent.recalled(message.toUserId(), message));
+            throw ChatException.badRequest("群聊为临时会话，不支持撤回");
+        }
+        if (!message.fromUserId().equals(identity.userId())) {
+            throw ChatException.forbidden("只能撤回自己的消息");
+        }
+        if (!message.recalled()) {
+            if (System.currentTimeMillis() - message.ts()
+                    > properties.recallWindowSeconds() * 1000L) {
+                throw ChatException.badRequest("超过撤回时限");
             }
+            messages.markRecalled(id, identity.userId(), System.currentTimeMillis());
+            ChatMessage updated = messages.findById(id);
+            if (updated != null) {
+                message = updated;
+            }
+        }
+        store.publish(ChatEvent.recalled(message.fromUserId(), message));
+        if (message.toUserId() != null) {
+            store.publish(ChatEvent.recalled(message.toUserId(), message));
         }
         return message;
     }

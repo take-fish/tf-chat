@@ -1,6 +1,5 @@
 package com.fishmatrix.chat.repository;
 
-import com.fishmatrix.chat.model.ChatException;
 import com.fishmatrix.chat.model.ChatGroup;
 import com.fishmatrix.chat.model.ChatMessage;
 import com.fishmatrix.chat.util.ConversationIds;
@@ -141,31 +140,13 @@ public class JdbcChatMessageRepository implements ChatMessageRepository {
     }
 
     @Override
-    public ChatMessage recall(String messageId, String userId, long windowMs) {
-        ChatMessage existing = findById(messageId);
-        if (existing == null) {
-            throw ChatException.notFound("消息不存在或群聊消息不支持撤回");
-        }
-        if (existing.groupId() != null) {
-            throw ChatException.badRequest("群聊为临时会话，不支持撤回");
-        }
-        if (!existing.fromUserId().equals(userId)) {
-            throw ChatException.forbidden("只能撤回自己的消息");
-        }
-        if (existing.recalled()) {
-            return existing;
-        }
-        if (System.currentTimeMillis() - existing.ts() > windowMs) {
-            throw ChatException.badRequest("超过撤回时限");
-        }
-        jdbc.update(
+    public int markRecalled(String messageId, String userId, long now) {
+        return jdbc.update(
                 "UPDATE chat_message SET content = '', recalled_at = ?, recalled_by = ? "
                         + "WHERE message_id = ? AND recalled_at IS NULL",
-                new Timestamp(System.currentTimeMillis()),
+                new Timestamp(now),
                 userId,
                 messageId);
-        ChatMessage updated = findById(messageId);
-        return updated == null ? existing : updated;
     }
 
     @Override
@@ -298,7 +279,8 @@ public class JdbcChatMessageRepository implements ChatMessageRepository {
         return values.isEmpty() || values.get(0) == null ? 0L : values.get(0);
     }
 
-    private ChatMessage findById(String messageId) {
+    @Override
+    public ChatMessage findById(String messageId) {
         List<ChatMessage> messages = jdbc.query(
                 SELECT_MESSAGE + " WHERE message_id = ?", MESSAGE_MAPPER, messageId);
         return messages.isEmpty() ? null : messages.get(0);
