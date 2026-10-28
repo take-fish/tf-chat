@@ -1,6 +1,5 @@
 package com.fishmatrix.chat.service;
 
-import com.fishmatrix.chat.model.ChatException;
 import com.fishmatrix.chat.model.ChatGroup;
 import com.fishmatrix.chat.model.ChatMessage;
 import com.fishmatrix.chat.repository.ChatMessageRepository;
@@ -87,27 +86,21 @@ class FakeChatMessageRepository implements ChatMessageRepository {
     }
 
     @Override
-    public ChatMessage recall(String messageId, String userId, long windowMs) {
-        ChatMessage existing = messages.stream()
+    public ChatMessage findById(String messageId) {
+        return messages.stream()
                 .filter(message -> message.id().equals(messageId))
                 .findFirst()
-                .orElseThrow(() -> ChatException.notFound("消息不存在或群聊消息不支持撤回"));
-        if (existing.groupId() != null) {
-            throw ChatException.badRequest("群聊为临时会话，不支持撤回");
+                .orElse(null);
+    }
+
+    @Override
+    public int markRecalled(String messageId, String userId, long now) {
+        ChatMessage existing = findById(messageId);
+        if (existing == null || existing.recalled()) {
+            return 0;
         }
-        if (!existing.fromUserId().equals(userId)) {
-            throw ChatException.forbidden("只能撤回自己的消息");
-        }
-        if (existing.recalled()) {
-            return existing;
-        }
-        if (System.currentTimeMillis() - existing.ts() > windowMs) {
-            throw ChatException.badRequest("超过撤回时限");
-        }
-        ChatMessage updated = copy(existing, existing.seq(), true);
-        int index = messages.indexOf(existing);
-        messages.set(index, updated);
-        return updated;
+        messages.set(messages.indexOf(existing), copy(existing, existing.seq(), true));
+        return 1;
     }
 
     @Override

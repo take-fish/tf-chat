@@ -230,6 +230,16 @@ class ChatServiceTest {
     }
 
     @Test
+    void recallRejectsMissingMessage() {
+        assertThatThrownBy(() -> service.recall(alice, "missing"))
+                .isInstanceOf(ChatException.class)
+                .hasMessageContaining("消息不存在");
+        assertThatThrownBy(() -> service.recall(alice, " "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("缺少消息 ID");
+    }
+
+    @Test
     void directUnreadClearsAfterRead() {
         ChatMessage message = service.sendDirectMessage(bob, "u1", "hi", "text", null);
         assertThat(service.unread(alice).dms().get("u2")).isEqualTo(1);
