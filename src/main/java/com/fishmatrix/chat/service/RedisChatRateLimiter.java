@@ -1,7 +1,7 @@
 package com.fishmatrix.chat.service;
 
 import com.fishmatrix.chat.config.ChatProperties;
-import com.fishmatrix.chat.model.ChatException;
+import com.fishmatrix.chat.error.ChatException;
 import java.time.Duration;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;

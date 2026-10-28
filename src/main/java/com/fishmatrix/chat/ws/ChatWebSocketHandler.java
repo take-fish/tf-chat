@@ -1,7 +1,7 @@
 package com.fishmatrix.chat.ws;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fishmatrix.chat.model.ChatException;
+import com.fishmatrix.chat.error.ChatException;
 import com.fishmatrix.chat.model.ChatIdentity;
 import com.fishmatrix.chat.model.ChatMessage;
 import com.fishmatrix.chat.model.ChatUser;
@@ -99,7 +99,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 smokeService.publishState();
                 log.info("聊天连接建立: {} ({})", identity.nickname(), identity.userId());
             } catch (ChatException exception) {
-                sendError(session, exception.getCode(), exception.getMessage());
+                sendError(session, exception.code(), exception.getMessage());
                 closeQuietly(session, CloseStatus.BAD_DATA);
             } catch (DataAccessException exception) {
                 sendError(session, "CHAT_UNAVAILABLE", "消息通道暂不可用");
@@ -134,7 +134,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                     default -> sendError(chatSession, "UNKNOWN_TYPE", "不支持的消息类型");
                 }
             } catch (ChatException exception) {
-                sendError(chatSession, exception.getCode(), exception.getMessage());
+                sendError(chatSession, exception.code(), exception.getMessage());
             } catch (IllegalArgumentException exception) {
                 sendError(chatSession, "BAD_REQUEST", exception.getMessage());
             } catch (DataAccessException exception) {

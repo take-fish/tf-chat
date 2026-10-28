@@ -1,7 +1,7 @@
 package com.fishmatrix.chat.service;
 
 import com.fishmatrix.chat.model.ChatEvent;
-import com.fishmatrix.chat.model.ChatException;
+import com.fishmatrix.chat.error.ChatException;
 import com.fishmatrix.chat.model.ChatIdentity;
 import com.fishmatrix.chat.model.OnlineMember;
 import com.fishmatrix.chat.model.SmokeStateView;

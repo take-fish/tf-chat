@@ -12,7 +12,7 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fishmatrix.chat.model.ChatException;
+import com.fishmatrix.chat.error.ChatException;
 import com.fishmatrix.chat.model.ChatIdentity;
 import com.fishmatrix.chat.model.ChatMessage;
 import com.fishmatrix.chat.service.ChatService;

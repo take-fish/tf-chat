@@ -7,7 +7,7 @@ import java.util.List;
 
 /**
  * 实时状态存储：在线成员、群内 presence、离线私聊队列与跨节点广播。
- * 消息历史与已读状态在 MySQL（ChatMessageRepository）。
+ * 消息历史与已读状态在 MySQL（ChatMessageMapper / ChatReadStateMapper）。
  */
 public interface ChatStore {
 
