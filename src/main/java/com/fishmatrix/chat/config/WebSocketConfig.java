@@ -2,6 +2,7 @@ package com.fishmatrix.chat.config;
 
 import com.fishmatrix.chat.auth.WsTicketHandshakeInterceptor;
 import com.fishmatrix.chat.ws.ChatWebSocketHandler;
+import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
@@ -11,20 +12,12 @@ import org.springframework.web.socket.server.standard.ServletServerContainerFact
 
 @Configuration
 @EnableWebSocket
+@RequiredArgsConstructor
 public class WebSocketConfig implements WebSocketConfigurer {
 
     private final ChatWebSocketHandler chatWebSocketHandler;
     private final WsTicketHandshakeInterceptor ticketInterceptor;
     private final ChatProperties properties;
-
-    public WebSocketConfig(
-            ChatWebSocketHandler chatWebSocketHandler,
-            WsTicketHandshakeInterceptor ticketInterceptor,
-            ChatProperties properties) {
-        this.chatWebSocketHandler = chatWebSocketHandler;
-        this.ticketInterceptor = ticketInterceptor;
-        this.properties = properties;
-    }
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {

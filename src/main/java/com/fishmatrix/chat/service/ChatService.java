@@ -1,27 +1,40 @@
 package com.fishmatrix.chat.service;
 
 import com.fishmatrix.chat.config.ChatProperties;
+import com.fishmatrix.chat.converter.ChatConverters;
+import com.fishmatrix.chat.entity.ChatGroupEntity;
+import com.fishmatrix.chat.entity.ChatMessageEntity;
+import com.fishmatrix.chat.error.ChatException;
+import com.fishmatrix.chat.mapper.ChatGroupMapper;
+import com.fishmatrix.chat.mapper.ChatMessageMapper;
+import com.fishmatrix.chat.mapper.ChatReadStateMapper;
 import com.fishmatrix.chat.model.ChatEvent;
 import com.fishmatrix.chat.model.ChatGroupView;
 import com.fishmatrix.chat.model.ChatIdentity;
 import com.fishmatrix.chat.model.ChatImage;
 import com.fishmatrix.chat.model.ChatMessage;
+import com.fishmatrix.chat.model.HistoryPage;
 import com.fishmatrix.chat.model.OnlineMember;
-import com.fishmatrix.chat.repository.ChatMessageRepository;
-import com.fishmatrix.chat.repository.ChatMessageRepository.HistoryPage;
-import com.fishmatrix.chat.repository.ChatMessageRepository.SaveResult;
-import com.fishmatrix.chat.repository.ChatMessageRepository.UnreadSummary;
+import com.fishmatrix.chat.model.SaveResult;
+import com.fishmatrix.chat.model.UnreadSummary;
 import com.fishmatrix.chat.store.ChatStore;
 import com.fishmatrix.chat.util.ConversationIds;
 import com.fishmatrix.chat.util.NodeNames;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 @Service
+@RequiredArgsConstructor
 public class ChatService {
 
     private static final Pattern USER_ID = Pattern.compile("[A-Za-z0-9_-]{1,64}");
@@ -30,33 +43,22 @@ public class ChatService {
             "[\\u0000-\\u0008\\u000B-\\u001F\\u007F-\\u009F\\u202A-\\u202E\\u2066-\\u2069]");
 
     private final ChatStore store;
-    private final ChatMessageRepository messages;
+    private final ChatMessageMapper messageMapper;
+    private final ChatGroupMapper groupMapper;
+    private final ChatReadStateMapper readStateMapper;
     private final ChatImageService images;
     private final ChatRateLimiter rateLimiter;
     private final ChatProperties properties;
 
-    public ChatService(
-            ChatStore store,
-            ChatMessageRepository messages,
-            ChatImageService images,
-            ChatRateLimiter rateLimiter,
-            ChatProperties properties) {
-        this.store = store;
-        this.messages = messages;
-        this.images = images;
-        this.rateLimiter = rateLimiter;
-        this.properties = properties;
-    }
-
     public List<ChatGroupView> groups(ChatIdentity viewer) {
-        Map<String, Integer> unread = messages.unread(viewer.userId()).groups();
-        return messages.groups().stream()
+        Map<String, Integer> unread = unread(viewer).groups();
+        return groupMapper.selectAllOrdered().stream()
                 .map(group -> new ChatGroupView(
-                        group.id(),
-                        group.name(),
-                        group.description(),
-                        store.members(group.id()).size(),
-                        unread.getOrDefault(group.id(), 0)))
+                        group.getId(),
+                        group.getName(),
+                        group.getDescription(),
+                        store.members(group.getId()).size(),
+                        unread.getOrDefault(group.getId(), 0)))
                 .toList();
     }
 
@@ -76,8 +78,11 @@ public class ChatService {
         requireUserId(peerUserId);
         requireNotSelf(viewer, peerUserId);
         requireCursor(beforeSeq, afterSeq);
-        return messages.directHistory(
-                viewer.userId(), peerUserId, beforeSeq, afterSeq, clamp(limit, 1, 200));
+        return page(
+                ConversationIds.direct(viewer.userId(), peerUserId),
+                beforeSeq,
+                afterSeq,
+                clamp(limit, 1, 200));
     }
 
     public List<ChatMessage> groupSearch(String groupId, String keyword, int limit) {
@@ -94,8 +99,10 @@ public class ChatService {
             int limit) {
         requireUserId(peerUserId);
         requireNotSelf(viewer, peerUserId);
-        return messages.searchDirect(
-                viewer.userId(), peerUserId, requireKeyword(keyword), clamp(limit, 1, 100));
+        return search(
+                ConversationIds.direct(viewer.userId(), peerUserId),
+                requireKeyword(keyword),
+                clamp(limit, 1, 100));
     }
 
     public List<OnlineMember> members(String groupId) {
@@ -141,7 +148,7 @@ public class ChatService {
                 : normalizeContent(content);
         ChatMessage message = newMessage(
                 sender, null, toUserId, normalizedContent, normalizedKind, clientMsgId);
-        SaveResult saved = messages.insertIfAbsent(message);
+        SaveResult saved = insertIfAbsent(message);
         if (saved.created()) {
             if (store.isOnline(toUserId)) {
                 store.publish(ChatEvent.directMessage(saved.message()));
@@ -154,19 +161,33 @@ public class ChatService {
 
     public ChatMessage recall(ChatIdentity identity, String messageId) {
         if (messageId == null || messageId.isBlank()) {
-            throw new IllegalArgumentException("缺少消息 ID");
+            throw ChatException.badRequest("缺少消息 ID");
         }
-        ChatMessage message = messages.recall(
-                messageId.strip(),
-                identity.userId(),
-                properties.recallWindowSeconds() * 1000L);
+        String id = messageId.strip();
+        ChatMessage message = findById(id);
+        if (message == null) {
+            throw ChatException.notFound("消息不存在或群聊消息不支持撤回");
+        }
         if (message.groupId() != null) {
-            store.publish(ChatEvent.recalled(message.groupId(), message));
-        } else {
-            store.publish(ChatEvent.recalled(message.fromUserId(), message));
-            if (message.toUserId() != null) {
-                store.publish(ChatEvent.recalled(message.toUserId(), message));
+            throw ChatException.badRequest("群聊为临时会话，不支持撤回");
+        }
+        if (!message.fromUserId().equals(identity.userId())) {
+            throw ChatException.forbidden("只能撤回自己的消息");
+        }
+        if (!message.recalled()) {
+            if (System.currentTimeMillis() - message.ts()
+                    > properties.recallWindowSeconds() * 1000L) {
+                throw ChatException.badRequest("超过撤回时限");
             }
+            messageMapper.markRecalled(id, identity.userId(), Instant.now());
+            ChatMessage updated = findById(id);
+            if (updated != null) {
+                message = updated;
+            }
+        }
+        store.publish(ChatEvent.recalled(message.fromUserId(), message));
+        if (message.toUserId() != null) {
+            store.publish(ChatEvent.recalled(message.toUserId(), message));
         }
         return message;
     }
@@ -180,17 +201,16 @@ public class ChatService {
         if (peerUserId != null) {
             requireUserId(peerUserId);
             requireNotSelf(viewer, peerUserId);
-            long target = seq == null
-                    ? messages.latestSeq(ConversationIds.direct(viewer.userId(), peerUserId))
-                    : Math.max(0L, seq);
-            messages.markRead(viewer.userId(), null, peerUserId, target);
+            String conversationId = ConversationIds.direct(viewer.userId(), peerUserId);
+            long target = seq == null ? latestSeq(conversationId) : Math.max(0L, seq);
+            markRead(viewer.userId(), conversationId, target);
             return;
         }
-        throw new IllegalArgumentException("缺少群组或私聊对象");
+        throw ChatException.badRequest("缺少群组或私聊对象");
     }
 
     public UnreadSummary unread(ChatIdentity viewer) {
-        return messages.unread(viewer.userId());
+        return unread(viewer.userId());
     }
 
     public ChatImage uploadImage(ChatIdentity viewer, MultipartFile file) {
@@ -226,7 +246,7 @@ public class ChatService {
                 properties.presenceTtlMs());
         if (groupId != null
                 && GROUP_ID.matcher(groupId).matches()
-                && messages.groupExists(groupId)) {
+                && groupMapper.selectById(groupId) != null) {
             store.upsertPresence(
                     new OnlineMember(
                             groupId,
@@ -271,24 +291,24 @@ public class ChatService {
     public void requireGroup(String groupId) {
         if (groupId == null
                 || !GROUP_ID.matcher(groupId).matches()
-                || !messages.groupExists(groupId)) {
-            throw new IllegalArgumentException("群组不存在或未授权访问");
+                || groupMapper.selectById(groupId) == null) {
+            throw ChatException.badRequest("群组不存在或未授权访问");
         }
     }
 
     public static void requireUserId(String userId) {
         if (userId == null || !USER_ID.matcher(userId).matches()) {
-            throw new IllegalArgumentException("userId 格式不合法");
+            throw ChatException.badRequest("userId 格式不合法");
         }
     }
 
     public String normalizeNickname(String nickname) {
         String cleaned = nickname == null ? "" : nickname.strip().replaceAll("\\s+", " ");
         if (cleaned.isEmpty()) {
-            throw new IllegalArgumentException("昵称不能为空");
+            throw ChatException.badRequest("昵称不能为空");
         }
         if (cleaned.codePointCount(0, cleaned.length()) > properties.maxNicknameLength()) {
-            throw new IllegalArgumentException("昵称过长");
+            throw ChatException.badRequest("昵称过长");
         }
         return cleaned;
     }
@@ -320,25 +340,130 @@ public class ChatService {
                 false);
     }
 
+    /**
+     * 按 (fromUserId, clientMsgId) 幂等写入。唯一索引冲突时回查已有消息，
+     * 保证客户端重发不会重复广播。
+     */
+    private SaveResult insertIfAbsent(ChatMessage message) {
+        if (message.clientMsgId() != null) {
+            ChatMessageEntity existing =
+                    messageMapper.selectByClient(message.fromUserId(), message.clientMsgId());
+            if (existing != null) {
+                return new SaveResult(ChatConverters.toMessage(existing), false);
+            }
+        }
+        ChatMessageEntity entity = ChatConverters.toEntity(message);
+        try {
+            messageMapper.insert(entity);
+        } catch (DuplicateKeyException exception) {
+            ChatMessageEntity existing = message.clientMsgId() == null
+                    ? null
+                    : messageMapper.selectByClient(message.fromUserId(), message.clientMsgId());
+            if (existing != null) {
+                return new SaveResult(ChatConverters.toMessage(existing), false);
+            }
+            throw exception;
+        }
+        return new SaveResult(ChatConverters.toMessage(entity), true);
+    }
+
+    private ChatMessage findById(String messageId) {
+        return ChatConverters.toMessage(messageMapper.selectByMessageId(messageId));
+    }
+
+    private HistoryPage page(String conversationId, Long beforeSeq, Long afterSeq, int limit) {
+        int fetch = limit + 1;
+        if (afterSeq != null) {
+            List<ChatMessageEntity> rows = messageMapper.selectAfter(conversationId, afterSeq, fetch);
+            boolean hasMore = rows.size() > limit;
+            List<ChatMessage> messages = rows.subList(0, Math.min(limit, rows.size())).stream()
+                    .map(ChatConverters::toMessage).toList();
+            return new HistoryPage(messages, hasMore, null);
+        }
+
+        List<ChatMessageEntity> rows = messageMapper.selectBefore(conversationId, beforeSeq, fetch);
+        boolean hasMore = rows.size() > limit;
+        // 查询按 seq 倒序取最近 limit 条，返回给前端时要转回升序。
+        List<ChatMessageEntity> ascending =
+                new ArrayList<>(rows.subList(0, Math.min(limit, rows.size())));
+        Collections.reverse(ascending);
+        List<ChatMessage> messages = ascending.stream().map(ChatConverters::toMessage).toList();
+        Long nextBeforeSeq = hasMore && !messages.isEmpty() ? messages.get(0).seq() : null;
+        return new HistoryPage(messages, hasMore, nextBeforeSeq);
+    }
+
+    private List<ChatMessage> search(String conversationId, String keyword, int limit) {
+        return messageMapper.selectSearch(conversationId, likePattern(keyword), limit).stream()
+                .map(ChatConverters::toMessage)
+                .toList();
+    }
+
+    private UnreadSummary unread(String userId) {
+        // 群聊是临时会话，不累计未读；只统计持久化的私聊。
+        Map<String, Integer> groupUnread = new LinkedHashMap<>();
+        for (ChatGroupEntity group : groupMapper.selectAllOrdered()) {
+            groupUnread.put(group.getId(), 0);
+        }
+        int total = 0;
+        Map<String, Integer> dmUnread = new LinkedHashMap<>();
+        for (String conversationId : messageMapper.selectDirectConversations(userId)) {
+            String peer = ConversationIds.peerOf(conversationId, userId);
+            if (peer == null) {
+                continue;
+            }
+            int count = messageMapper.countUnread(
+                    conversationId, lastReadSeq(userId, conversationId), userId);
+            if (count > 0) {
+                dmUnread.put(peer, count);
+                total += count;
+            }
+        }
+        return new UnreadSummary(groupUnread, dmUnread, total);
+    }
+
+    /** 位点先更新、缺失再插入；并发插入撞主键时回退为更新。 */
+    private void markRead(String userId, String conversationId, long seq) {
+        Instant now = Instant.now();
+        int updated = readStateMapper.updateLastReadSeq(userId, conversationId, seq, now);
+        if (updated > 0) {
+            return;
+        }
+        try {
+            readStateMapper.insertReadState(userId, conversationId, seq, now);
+        } catch (DuplicateKeyException ignored) {
+            readStateMapper.updateLastReadSeq(userId, conversationId, seq, now);
+        }
+    }
+
+    private long latestSeq(String conversationId) {
+        Long seq = messageMapper.selectLatestSeq(conversationId);
+        return seq == null ? 0L : seq;
+    }
+
+    private long lastReadSeq(String userId, String conversationId) {
+        Long seq = readStateMapper.selectLastReadSeq(userId, conversationId);
+        return seq == null ? 0L : seq;
+    }
+
     private void requireCursor(Long beforeSeq, Long afterSeq) {
         if (beforeSeq != null && afterSeq != null) {
-            throw new IllegalArgumentException("beforeSeq 与 afterSeq 不能同时使用");
+            throw ChatException.badRequest("beforeSeq 与 afterSeq 不能同时使用");
         }
         if ((beforeSeq != null && beforeSeq < 0) || (afterSeq != null && afterSeq < 0)) {
-            throw new IllegalArgumentException("游标不合法");
+            throw ChatException.badRequest("游标不合法");
         }
     }
 
     private void requireNotSelf(ChatIdentity viewer, String peerUserId) {
         if (viewer.userId().equals(peerUserId)) {
-            throw new IllegalArgumentException("不能与当前节点建立会话");
+            throw ChatException.badRequest("不能与当前节点建立会话");
         }
     }
 
     private String requireKeyword(String keyword) {
         String cleaned = keyword == null ? "" : keyword.strip();
         if (cleaned.isEmpty()) {
-            throw new IllegalArgumentException("搜索关键字不能为空");
+            throw ChatException.badRequest("搜索关键字不能为空");
         }
         return cleaned.length() > 64 ? cleaned.substring(0, 64) : cleaned;
     }
@@ -347,10 +472,10 @@ public class ChatService {
         String cleaned = content == null ? "" : content.replace("\r\n", "\n");
         cleaned = UNSAFE_CONTROL.matcher(cleaned).replaceAll("").strip();
         if (cleaned.isEmpty()) {
-            throw new IllegalArgumentException("消息内容不能为空");
+            throw ChatException.badRequest("消息内容不能为空");
         }
         if (cleaned.codePointCount(0, cleaned.length()) > properties.maxContentLength()) {
-            throw new IllegalArgumentException("消息内容过长");
+            throw ChatException.badRequest("消息内容过长");
         }
         return cleaned;
     }
@@ -374,6 +499,14 @@ public class ChatService {
             return null;
         }
         return cleaned.length() > 80 ? cleaned.substring(0, 80) : cleaned;
+    }
+
+    private static String likePattern(String keyword) {
+        String escaped = keyword
+                .replace("!", "!!")
+                .replace("%", "!%")
+                .replace("_", "!_");
+        return "%" + escaped + "%";
     }
 
     private int clamp(int value, int min, int max) {

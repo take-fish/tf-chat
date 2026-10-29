@@ -6,8 +6,8 @@ import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
 import java.util.Map;
 import java.util.Optional;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.ServerHttpRequest;
@@ -18,17 +18,12 @@ import org.springframework.web.socket.server.HandshakeInterceptor;
 import org.springframework.web.util.UriComponentsBuilder;
 
 @Component
+@RequiredArgsConstructor
+@Slf4j
 public class WsTicketHandshakeInterceptor implements HandshakeInterceptor {
-
-    private static final Logger log = LoggerFactory.getLogger(WsTicketHandshakeInterceptor.class);
 
     private final WsTicketService tickets;
     private final ObjectProvider<Tracer> tracerProvider;
-
-    public WsTicketHandshakeInterceptor(WsTicketService tickets, ObjectProvider<Tracer> tracerProvider) {
-        this.tickets = tickets;
-        this.tracerProvider = tracerProvider;
-    }
 
     @Override
     public boolean beforeHandshake(

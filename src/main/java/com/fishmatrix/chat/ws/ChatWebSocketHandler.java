@@ -1,7 +1,7 @@
 package com.fishmatrix.chat.ws;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fishmatrix.chat.model.ChatException;
+import com.fishmatrix.chat.error.ChatException;
 import com.fishmatrix.chat.model.ChatIdentity;
 import com.fishmatrix.chat.model.ChatMessage;
 import com.fishmatrix.chat.model.ChatUser;
@@ -13,8 +13,7 @@ import io.micrometer.tracing.TraceContext;
 import io.micrometer.tracing.Tracer;
 import java.util.List;
 import java.util.Map;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
@@ -25,12 +24,11 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 @Component
+@Slf4j
 public class ChatWebSocketHandler extends TextWebSocketHandler {
 
     public static final String ATTR_IDENTITY = "chat.identity";
     public static final String ATTR_TRACE_CONTEXT = "chat.traceContext";
-
-    private static final Logger log = LoggerFactory.getLogger(ChatWebSocketHandler.class);
 
     private final ChatService chatService;
     private final SmokeService smokeService;
@@ -101,7 +99,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 smokeService.publishState();
                 log.info("聊天连接建立: {} ({})", identity.nickname(), identity.userId());
             } catch (ChatException exception) {
-                sendError(session, exception.getCode(), exception.getMessage());
+                sendError(session, exception.code(), exception.getMessage());
                 closeQuietly(session, CloseStatus.BAD_DATA);
             } catch (DataAccessException exception) {
                 sendError(session, "CHAT_UNAVAILABLE", "消息通道暂不可用");
@@ -136,7 +134,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                     default -> sendError(chatSession, "UNKNOWN_TYPE", "不支持的消息类型");
                 }
             } catch (ChatException exception) {
-                sendError(chatSession, exception.getCode(), exception.getMessage());
+                sendError(chatSession, exception.code(), exception.getMessage());
             } catch (IllegalArgumentException exception) {
                 sendError(chatSession, "BAD_REQUEST", exception.getMessage());
             } catch (DataAccessException exception) {

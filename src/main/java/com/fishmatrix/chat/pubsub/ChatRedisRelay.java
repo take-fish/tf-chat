@@ -8,30 +8,21 @@ import com.fishmatrix.common.trace.TraceIds;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 import org.springframework.data.redis.connection.Message;
 import org.springframework.data.redis.connection.MessageListener;
 import org.springframework.stereotype.Component;
 
 @Component
+@RequiredArgsConstructor
+@Slf4j
 public class ChatRedisRelay implements MessageListener {
-
-    private static final Logger log = LoggerFactory.getLogger(ChatRedisRelay.class);
 
     private final ChatSessionRegistry registry;
     private final ObjectMapper objectMapper;
     private final SmokeService smokeService;
-
-    public ChatRedisRelay(
-            ChatSessionRegistry registry,
-            ObjectMapper objectMapper,
-            SmokeService smokeService) {
-        this.registry = registry;
-        this.objectMapper = objectMapper;
-        this.smokeService = smokeService;
-    }
 
     @Override
     public void onMessage(Message message, byte[] pattern) {

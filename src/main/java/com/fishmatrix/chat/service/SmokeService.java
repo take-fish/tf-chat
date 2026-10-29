@@ -1,7 +1,7 @@
 package com.fishmatrix.chat.service;
 
 import com.fishmatrix.chat.model.ChatEvent;
-import com.fishmatrix.chat.model.ChatException;
+import com.fishmatrix.chat.error.ChatException;
 import com.fishmatrix.chat.model.ChatIdentity;
 import com.fishmatrix.chat.model.OnlineMember;
 import com.fishmatrix.chat.model.SmokeStateView;
@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
@@ -26,6 +27,7 @@ import org.springframework.stereotype.Service;
  * 可继续邀请更多人，结束由用户手动触发。状态放在 Redis，WebSocket 通过 Redis 广播刷新。</p>
  */
 @Service
+@RequiredArgsConstructor
 public class SmokeService {
 
     /** 兜底清理超过 12 小时未变化的会话，避免异常退出后永久占位。 */
@@ -35,15 +37,6 @@ public class SmokeService {
     private final ChatStore chatStore;
     private final ChatSessionRegistry registry;
     private final Object lock = new Object();
-
-    public SmokeService(
-            SmokeStore smokeStore,
-            ChatStore chatStore,
-            ChatSessionRegistry registry) {
-        this.smokeStore = smokeStore;
-        this.chatStore = chatStore;
-        this.registry = registry;
-    }
 
     public SmokeStateView stateFor(String userId) {
         List<SmokeSession> sessions;

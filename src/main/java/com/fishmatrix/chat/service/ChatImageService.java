@@ -1,10 +1,13 @@
 package com.fishmatrix.chat.service;
 
 import com.fishmatrix.chat.config.ChatProperties;
-import com.fishmatrix.chat.model.ChatException;
+import com.fishmatrix.chat.converter.ChatConverters;
+import com.fishmatrix.chat.entity.ChatImageEntity;
+import com.fishmatrix.chat.error.ChatException;
+import com.fishmatrix.chat.mapper.ChatImageMapper;
+import com.fishmatrix.chat.mapper.ChatMessageMapper;
 import com.fishmatrix.chat.model.ChatIdentity;
 import com.fishmatrix.chat.model.ChatImage;
-import com.fishmatrix.chat.repository.ChatImageRepository;
 import jakarta.annotation.PostConstruct;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -14,8 +17,7 @@ import java.util.Base64;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -24,19 +26,21 @@ import org.springframework.web.multipart.MultipartFile;
  * 群聊图片不经过这里，只在 WebSocket 帧中实时转发。
  */
 @Service
+@Slf4j
 public class ChatImageService {
-
-    private static final Logger log = LoggerFactory.getLogger(ChatImageService.class);
 
     private static final Pattern IMAGE_ID = Pattern.compile("[A-Za-z0-9-]{1,64}");
     private static final Set<String> SUBTYPES = Set.of("png", "jpeg", "gif", "webp");
 
-    private final ChatImageRepository repository;
+    private final ChatImageMapper imageMapper;
+    private final ChatMessageMapper messageMapper;
     private final ChatProperties properties;
     private final Path root;
 
-    public ChatImageService(ChatImageRepository repository, ChatProperties properties) {
-        this.repository = repository;
+    public ChatImageService(
+            ChatImageMapper imageMapper, ChatMessageMapper messageMapper, ChatProperties properties) {
+        this.imageMapper = imageMapper;
+        this.messageMapper = messageMapper;
         this.properties = properties;
         this.root = Path.of(properties.imageDir()).toAbsolutePath().normalize();
     }
@@ -83,7 +87,9 @@ public class ChatImageService {
         ChatImage image = new ChatImage(
                 id, owner.userId(), contentType, bytes.length, System.currentTimeMillis());
         try {
-            return repository.insert(image);
+            ChatImageEntity entity = ChatConverters.toEntity(image);
+            imageMapper.insert(entity);
+            return ChatConverters.toImage(entity);
         } catch (RuntimeException exception) {
             deleteQuietly(target);
             throw exception;
@@ -93,7 +99,7 @@ public class ChatImageService {
     public StoredImage load(ChatIdentity viewer, String imageId) {
         ChatImage image = requireImage(imageId);
         if (!image.ownerUserId().equals(viewer.userId())
-                && !repository.isDirectParticipant(image.id(), viewer.userId())) {
+                && messageMapper.countImageRefs(image.id(), viewer.userId()) == 0) {
             throw ChatException.forbidden("无权查看该图片");
         }
         Path path = resolve(image.id());
@@ -160,7 +166,7 @@ public class ChatImageService {
         if (!IMAGE_ID.matcher(cleaned).matches()) {
             throw ChatException.badRequest("图片 ID 不合法");
         }
-        ChatImage image = repository.find(cleaned);
+        ChatImage image = ChatConverters.toImage(imageMapper.selectById(cleaned));
         if (image == null) {
             throw ChatException.notFound("图片不存在");
         }

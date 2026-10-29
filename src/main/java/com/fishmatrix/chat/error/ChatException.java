@@ -1,4 +1,4 @@
-package com.fishmatrix.chat.model;
+package com.fishmatrix.chat.error;
 
 import com.fishmatrix.common.error.ApiException;
 import com.fishmatrix.common.error.ErrorCodes;
@@ -11,14 +11,6 @@ public class ChatException extends ApiException {
 
     public ChatException(HttpStatus status, String code, String message) {
         super(status, code, message);
-    }
-
-    public HttpStatus getStatus() {
-        return status();
-    }
-
-    public String getCode() {
-        return code();
     }
 
     public static ChatException unauthorized(String message) {

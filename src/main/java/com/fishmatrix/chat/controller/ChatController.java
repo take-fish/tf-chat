@@ -8,14 +8,15 @@ import com.fishmatrix.chat.model.ChatImage;
 import com.fishmatrix.chat.model.ChatMessage;
 import com.fishmatrix.chat.model.OnlineMember;
 import com.fishmatrix.chat.model.ReadRequest;
-import com.fishmatrix.chat.repository.ChatMessageRepository.HistoryPage;
-import com.fishmatrix.chat.repository.ChatMessageRepository.UnreadSummary;
+import com.fishmatrix.chat.model.HistoryPage;
+import com.fishmatrix.chat.model.UnreadSummary;
 import com.fishmatrix.chat.service.ChatImageService;
 import com.fishmatrix.chat.service.ChatService;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -33,15 +34,11 @@ import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/v1/chat")
+@RequiredArgsConstructor
 public class ChatController {
 
     private final ChatService chatService;
     private final WsTicketService ticketService;
-
-    public ChatController(ChatService chatService, WsTicketService ticketService) {
-        this.chatService = chatService;
-        this.ticketService = ticketService;
-    }
 
     @GetMapping("/groups")
     public Map<String, Object> groups(

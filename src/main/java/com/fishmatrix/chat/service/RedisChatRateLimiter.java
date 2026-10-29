@@ -1,23 +1,20 @@
 package com.fishmatrix.chat.service;
 
 import com.fishmatrix.chat.config.ChatProperties;
-import com.fishmatrix.chat.model.ChatException;
+import com.fishmatrix.chat.error.ChatException;
 import java.time.Duration;
+import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 @Service
+@RequiredArgsConstructor
 public class RedisChatRateLimiter implements ChatRateLimiter {
 
     private static final long WINDOW_MS = 10_000L;
 
     private final StringRedisTemplate redis;
     private final ChatProperties properties;
-
-    public RedisChatRateLimiter(StringRedisTemplate redis, ChatProperties properties) {
-        this.redis = redis;
-        this.properties = properties;
-    }
 
     @Override
     public void acquire(String userId) {

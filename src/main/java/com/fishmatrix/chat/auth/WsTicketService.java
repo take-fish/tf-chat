@@ -8,6 +8,7 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.Optional;
+import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -15,6 +16,7 @@ import org.springframework.stereotype.Service;
  * 一次性 WebSocket 握手票据：避免把长期 Bearer token 放进 URL / 访问日志。
  */
 @Service
+@RequiredArgsConstructor
 public class WsTicketService {
 
     private static final String PREFIX = "tf:chat:ws-ticket:";
@@ -23,15 +25,6 @@ public class WsTicketService {
     private final StringRedisTemplate redis;
     private final ObjectMapper objectMapper;
     private final ChatProperties properties;
-
-    public WsTicketService(
-            StringRedisTemplate redis,
-            ObjectMapper objectMapper,
-            ChatProperties properties) {
-        this.redis = redis;
-        this.objectMapper = objectMapper;
-        this.properties = properties;
-    }
 
     public Ticket issue(ChatIdentity identity) {
         byte[] bytes = new byte[24];
