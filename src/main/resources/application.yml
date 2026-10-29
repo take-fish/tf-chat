@@ -7,7 +7,7 @@ spring:
     timeout-per-shutdown-phase: ${SHUTDOWN_TIMEOUT:20s}
   cloud:
     nacos:
-      server-addr: ${NACOS_ADDR:10.28.13.214:8848}
+      server-addr: ${NACOS_ADDR:nacos:8848}
       discovery:
         namespace: ${NACOS_NAMESPACE:fm-prod}
         username: ${NACOS_USERNAME:nacos}
@@ -25,7 +25,7 @@ spring:
         import-check:
           enabled: false
   datasource:
-    url: jdbc:mysql://${MYSQL_HOST:10.28.13.214}:${MYSQL_PORT:3306}/${MYSQL_DB:fm_chat}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://${MYSQL_HOST:mysql}:${MYSQL_PORT:3306}/${MYSQL_DB:fm_chat}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
     username: ${MYSQL_APP_USER:fm_chat_app}
     password: ${MYSQL_APP_PASSWORD:}
   sql:
@@ -38,7 +38,7 @@ spring:
       max-request-size: 8MB
   data:
     redis:
-      host: ${REDIS_HOST:10.28.13.214}
+      host: ${REDIS_HOST:redis}
       port: ${REDIS_PORT:6379}
       database: ${REDIS_DATABASE:0}
 
