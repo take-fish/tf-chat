@@ -74,6 +74,23 @@ app:
     image-dir: ${CHAT_IMAGE_DIR:./data/chat-images}
     max-image-bytes: ${CHAT_MAX_IMAGE_BYTES:5242880}
     max-group-image-bytes: ${CHAT_MAX_GROUP_IMAGE_BYTES:1048576}
+    # 聊天接入智能助手：@ 展示名触发。展示名不写死，运行时从 agent 读取；
+    # fallback-name 只在 agent 暂时取不到名字时兜底。
+    agent:
+      enabled: ${CHAT_AGENT_ENABLED:true}
+      base-url: ${CHAT_AGENT_URL:${TF_AGENT_URL:http://10.28.13.214:8201}}
+      env: ${CHAT_AGENT_ENV:prod}
+      fallback-name: ${CHAT_AGENT_FALLBACK_NAME:}
+      profile-cache-seconds: ${CHAT_AGENT_PROFILE_CACHE_SECONDS:60}
+      connect-timeout-seconds: 3
+      turn-timeout-seconds: ${CHAT_AGENT_TURN_TIMEOUT_SECONDS:120}
+      max-concurrent-turns: ${CHAT_AGENT_MAX_CONCURRENT_TURNS:2}
+      queue-capacity: 16
+      chunk-min-chars: 40
+      chunk-max-chars: 400
+      chunk-interval-ms: 800
+      max-reply-chars: 4000
+      max-prompt-chars: 2000
 
 management:
   tracing:

@@ -1,5 +1,6 @@
 package com.fishmatrix.chat.service;
 
+import com.fishmatrix.chat.agent.AgentReplyService;
 import com.fishmatrix.chat.config.ChatProperties;
 import com.fishmatrix.chat.converter.ChatConverters;
 import com.fishmatrix.chat.entity.ChatGroupEntity;
@@ -49,6 +50,7 @@ public class ChatService {
     private final ChatImageService images;
     private final ChatRateLimiter rateLimiter;
     private final ChatProperties properties;
+    private final AgentReplyService agentReplies;
 
     public List<ChatGroupView> groups(ChatIdentity viewer) {
         Map<String, Integer> unread = unread(viewer).groups();
@@ -130,6 +132,9 @@ public class ChatService {
                 sender, groupId, null, normalizedContent, normalizedKind, clientMsgId);
         // 群聊为临时会话：不写 MySQL，只广播给当前在线的群成员。
         store.publish(ChatEvent.groupMessage(message));
+        if (ChatMessage.KIND_TEXT.equals(normalizedKind)) {
+            agentReplies.afterGroupMessage(sender, groupId, normalizedContent);
+        }
         return message;
     }
 
@@ -154,6 +159,9 @@ public class ChatService {
                 store.publish(ChatEvent.directMessage(saved.message()));
             } else {
                 store.addOfflineMessage(toUserId, saved.message());
+            }
+            if (ChatMessage.KIND_TEXT.equals(normalizedKind)) {
+                agentReplies.afterDirectMessage(sender, toUserId, normalizedContent);
             }
         }
         return saved.message();

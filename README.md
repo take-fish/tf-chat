@@ -55,7 +55,7 @@ REST 与 WebSocket 都不接受客户端自报身份，昵称与角色始终来�
 - `afterSeq`：断线补消息，返回该游标之后的消息。
 - 两者不能同时使用；响应 `{messages, hasMore, nextBeforeSeq}`，`messages` 按 `seq` 升序。
 
-`ChatMessage` 字段：`id`（UUID）、`seq`（全局递增游标；群聊临时消息为 0）、`groupId`、`fromUserId`、`fromNickname`、`fromNode`、`toUserId`、`content`、`kind`（`text` / `ascii` / `image`）、`ts`、`clientMsgId`、`recalled`。
+`ChatMessage` 字段：`id`（UUID）、`seq`（全局递增游标；群聊临时消息为 0）、`groupId`、`fromUserId`、`fromNickname`、`fromNode`、`toUserId`、`content`、`kind`（`text` / `ascii` / `image`）、`ts`、`clientMsgId`、`recalled`、`streamId`（智能助手流式回答的分段 ID，普通消息为 `null`）。
 
 图片消息约定：
 
@@ -121,6 +121,32 @@ REST 与 WebSocket 都不接受客户端自报身份，昵称与角色始终来�
 - **冒烟测试**：会话存 Redis（TTL 24 小时），只允许邀请聊天在线用户；同一时间只能加入一个进行中的会话，
   接受一条邀请后其他待处理邀请自动作废；超过 12 小时未变化的会话会被清理。
 - **离线私聊**：接收者不在线时写入 `tf:chat:offline:<userId>`，重连后 `RENAME` 到临时键再读取补发，避免丢消息。
+
+## 接入智能助手（@触发）
+
+在群聊或私聊里输入 `@<展示名> <问题>`，智能助手（tf-agent）把回答实时发回当前会话。
+
+- **触发名不写死**：名字取自 agent 侧「Agent 试衣间」的展示配置，聊天服务每 60 秒
+  用 `GET /api/v1/agent/chat-identity` 刷新一次并缓存；agent 暂时读不到时用
+  `CHAT_AGENT_FALLBACK_NAME` 兜底（为空则不触发）。
+- **流式回答**：片段作为普通消息广播，同一段回答共享一个 `streamId`，前端据此合并成
+  一个块；群聊仍不落库，私聊只在结束时落一条完整消息（历史里就是一条）。
+- **身份与权限**：聊天服务代表 @ 的那个人，用同一个 `FM_IDENTITY_SECRET` 签发
+  `X-FM-*` 头直连 agent；权限和审计都按真实用户算，没有 `agent.chat.use` 会收到
+  「没有使用智能助手的权限」。
+- **并发与长度**：同一会话单飞（上一轮没答完再 @ 会收到提示），最多 2 轮并行，
+  单轮 120 秒超时；回答超过 4000 字截断，提问超过 2000 字截断。
+- 助手消息的 `fromUserId` 固定为 `agent`，昵称随 agent 展示名变化，节点固定 `fm-agent`。
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `CHAT_AGENT_ENABLED` | `true` | 总开关 |
+| `CHAT_AGENT_URL`（回退 `TF_AGENT_URL`） | `http://10.28.13.214:8201` | agent 地址 |
+| `CHAT_AGENT_ENV` | `prod` | 工具查询环境：`prod` / `test` |
+| `CHAT_AGENT_FALLBACK_NAME` | 空 | 取不到 agent 展示名时的兜底触发词 |
+| `CHAT_AGENT_PROFILE_CACHE_SECONDS` | `60` | 展示名缓存时间 |
+| `CHAT_AGENT_TURN_TIMEOUT_SECONDS` | `120` | 单轮对话超时 |
+| `CHAT_AGENT_MAX_CONCURRENT_TURNS` | `2` | 并行回合上限 |
 
 ## 数据库
 

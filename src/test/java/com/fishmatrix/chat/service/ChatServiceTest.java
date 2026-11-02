@@ -75,6 +75,9 @@ class ChatServiceTest {
     @Autowired
     private ChatProperties properties;
 
+    @Autowired
+    private com.fishmatrix.chat.agent.AgentReplyService agentReplies;
+
     @MockitoBean
     private ChatImageService images;
 
@@ -330,7 +333,8 @@ class ChatServiceTest {
                 userId -> {
                     throw ChatException.rateLimited("发送过于频繁");
                 },
-                properties);
+                properties,
+                agentReplies);
 
         assertThatThrownBy(() -> limited.sendGroupMessage(
                         alice, "dev-group", "hi", "text", null))
