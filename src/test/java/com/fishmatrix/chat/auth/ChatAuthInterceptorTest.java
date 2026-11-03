@@ -25,14 +25,16 @@ class ChatAuthInterceptorTest {
 
     @Test
     void adaptsCurrentUserToChatIdentity() {
-        UserContext.set(new CurrentUser(3, "jia", "甲", "USER", List.of("USER"), Set.of()));
+        UserContext.set(new CurrentUser(
+                3, "jia", "甲", "USER", List.of("USER"), Set.of("agent.chat.use")));
         MockHttpServletRequest request = new MockHttpServletRequest();
 
         boolean allowed = interceptor.preHandle(request, new MockHttpServletResponse(), new Object());
 
         assertThat(allowed).isTrue();
         assertThat(request.getAttribute(ChatAuthInterceptor.ATTR_IDENTITY))
-                .isEqualTo(ChatIdentity.of(3, "甲", "USER"));
+                .isEqualTo(ChatIdentity.of(
+                        3, "甲", "USER", "jia", List.of("USER"), List.of("agent.chat.use")));
     }
 
     @Test

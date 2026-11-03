@@ -319,6 +319,10 @@ x-websocket:
     幂等：同一发送者重复使用 `clientMsgId` 只落库一次；断线重连后可用
     `afterSeq` 补拉，再按消息 `id` 去重。
 
+    智能助手：`message` / `dm` 内容以 `@展示名` 开头时，聊天服务会异步调用 tf-agent，
+    回答以普通 `message` / `dm` 帧推给会话成员（`fromUserId=agent`、`fromNode=fm-agent`），
+    同一段回答的多个片段共享 `streamId`。展示名由 agent 侧管理员配置，聊天服务缓存 60 秒。
+
 components:
   securitySchemes:
     bearerAuth:
@@ -440,6 +444,10 @@ components:
           type: string
           nullable: true
         recalled: { type: boolean }
+        streamId:
+          type: string
+          nullable: true
+          description: 智能助手流式回答的分段 ID；同一段回答的多个消息共享该值，前端合并显示。普通消息为 null。
 
     ChatGroupView:
       type: object

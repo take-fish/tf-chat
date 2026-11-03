@@ -5,6 +5,7 @@ import com.fishmatrix.common.auth.CurrentUser;
 import com.fishmatrix.common.auth.UserContext;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import java.util.List;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
@@ -23,7 +24,15 @@ public class ChatAuthInterceptor implements HandlerInterceptor {
             HttpServletResponse response,
             Object handler) {
         CurrentUser user = UserContext.require();
-        request.setAttribute(ATTR_IDENTITY, ChatIdentity.of(user.id(), user.nickname(), user.role()));
+        request.setAttribute(
+                ChatAuthInterceptor.ATTR_IDENTITY,
+                ChatIdentity.of(
+                        user.id(),
+                        user.nickname(),
+                        user.role(),
+                        user.username(),
+                        user.roles(),
+                        List.copyOf(user.permissions())));
         return true;
     }
 }
