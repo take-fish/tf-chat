@@ -119,6 +119,17 @@ class HttpAgentApiClientTest {
     }
 
     @Test
+    @DisplayName("调用 agent 固定走 HTTP/1.1，不发 h2c Upgrade（uvicorn 会丢 POST body 返回 422）")
+    void doesNotSendH2cUpgrade() {
+        client().stream(caller(), "你好", "session-1", new NoopListener());
+
+        Map<String, List<String>> headers = chatHeaders.get();
+        assertThat(headers).isNotNull();
+        assertThat(header(headers, "Upgrade")).isNull();
+        assertThat(header(headers, "Connection")).isNullOrEmpty();
+    }
+
+    @Test
     @DisplayName("agent 返回 403 时给一句能看懂的权限提示")
     void mapsForbiddenToFriendlyMessage() {
         server.removeContext("/api/v1/agent/chat");
