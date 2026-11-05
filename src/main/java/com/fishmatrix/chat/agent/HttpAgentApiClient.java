@@ -48,7 +48,10 @@ public class HttpAgentApiClient implements AgentApiClient {
             ChatAgentProperties properties, ObjectProvider<IdentitySigner> signerProvider) {
         this.properties = properties;
         this.signerProvider = signerProvider;
+        // JDK HttpClient 默认 HTTP_2，对 http:// 会先发 h2c Upgrade；uvicorn 不支持且
+        // 会丢掉带 body 的 POST，agent 侧表现为 422「请求参数校验未通过」。固定 HTTP/1.1。
         this.http = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(Duration.ofSeconds(properties.connectTimeoutSeconds()))
                 .build();
     }
