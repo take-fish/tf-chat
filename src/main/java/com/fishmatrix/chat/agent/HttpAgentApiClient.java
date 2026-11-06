@@ -86,6 +86,16 @@ public class HttpAgentApiClient implements AgentApiClient {
     @Override
     public void stream(
             AgentCaller caller, String prompt, String sessionId, AgentStreamListener listener) {
+        stream(caller, prompt, sessionId, null, listener);
+    }
+
+    @Override
+    public void stream(
+            AgentCaller caller,
+            String prompt,
+            String sessionId,
+            AgentImage image,
+            AgentStreamListener listener) {
         HttpRequest request = withIdentity(
                         HttpRequest.newBuilder(uri(CHAT_PATH))
                                 .timeout(Duration.ofSeconds(properties.turnTimeoutSeconds()))
@@ -93,7 +103,7 @@ public class HttpAgentApiClient implements AgentApiClient {
                                 .header("Accept", "text/event-stream"),
                         caller)
                 .POST(HttpRequest.BodyPublishers.ofString(
-                        body(prompt, sessionId), StandardCharsets.UTF_8))
+                        body(prompt, sessionId, image), StandardCharsets.UTF_8))
                 .build();
 
         long deadline = System.currentTimeMillis() + properties.turnTimeoutSeconds() * 1000L;
@@ -160,13 +170,17 @@ public class HttpAgentApiClient implements AgentApiClient {
         }
     }
 
-    private String body(String prompt, String sessionId) {
+    private String body(String prompt, String sessionId, AgentImage image) {
         try {
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("message", prompt);
             payload.put("session_id", sessionId);
             payload.put("scene", "");
             payload.put("env", properties.env());
+            if (image != null) {
+                // 只在请求体里带图：不写日志、不落库。标准 Base64 与 agent 侧校验一致。
+                payload.put("image", Map.of("mime", image.mime(), "data", image.base64()));
+            }
             return MAPPER.writeValueAsString(payload);
         } catch (Exception exception) {
             throw new AgentUnavailableException("智能助手请求序列化失败", exception);

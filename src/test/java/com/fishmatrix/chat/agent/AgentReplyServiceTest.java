@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import com.fishmatrix.chat.config.ChatAgentProperties;
 import com.fishmatrix.chat.config.ChatProperties;
@@ -14,8 +15,10 @@ import com.fishmatrix.chat.model.ChatEvent;
 import com.fishmatrix.chat.model.ChatIdentity;
 import com.fishmatrix.chat.model.ChatMessage;
 import com.fishmatrix.chat.model.OnlineMember;
+import com.fishmatrix.chat.service.ChatImageService;
 import com.fishmatrix.chat.store.ChatStore;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
@@ -31,7 +34,9 @@ class AgentReplyServiceTest {
 
     private final RecordingStore store = new RecordingStore();
     private final ChatMessageMapper messageMapper = mock(ChatMessageMapper.class);
+    private final ChatImageService images = mock(ChatImageService.class);
     private final StubClient client = new StubClient();
+    private AgentImageCache imageCache;
     private final ChatIdentity alice = ChatIdentity.of(1, "甲", "USER", "alice",
             List.of("USER"), List.of("agent.chat.use"));
 
@@ -43,8 +48,16 @@ class AgentReplyServiceTest {
 
     private AgentReplyService service(ChatAgentProperties properties) {
         AgentProfileCache profile = new AgentProfileCache(properties, client);
+        imageCache = new AgentImageCache(properties);
         return new AgentReplyService(
-                properties, chatProperties(), profile, client, store, messageMapper);
+                properties,
+                chatProperties(),
+                profile,
+                client,
+                store,
+                messageMapper,
+                imageCache,
+                images);
     }
 
     private static ChatProperties chatProperties() {
@@ -55,7 +68,7 @@ class AgentReplyServiceTest {
     private static ChatAgentProperties properties(boolean enabled, String fallback, int concurrency) {
         return new ChatAgentProperties(
                 enabled, "http://127.0.0.1:1", "prod", fallback, 60, 1, 5, concurrency, 4,
-                1, 4000, 5, 4000, 2000);
+                1, 4000, 5, 4000, 2000, 120, 16);
     }
 
     @Test
@@ -198,6 +211,79 @@ class AgentReplyServiceTest {
                 .anySatisfy(text -> assertThat(text).contains("没查到结果"));
     }
 
+    @Test
+    @DisplayName("群聊先发图、再 @：把最近一张图随提问发给 agent")
+    void attachesRecentGroupImageToMention() {
+        String dataUrl = "data:image/png;base64,AQID";
+        byte[] bytes = {1, 2, 3};
+        when(images.readGroupDataUrl(dataUrl))
+                .thenReturn(new ChatImageService.StoredImage(bytes, "image/png"));
+        client.behavior = listener -> listener.onComplete("图里是错误日志");
+        AgentReplyService service = service(properties(true, "小鱼", 1));
+
+        imageCache.rememberGroup("group:dev-group", "u1", dataUrl);
+        service.afterGroupMessage(alice, "dev-group", "@小鱼 这个报错什么意思");
+
+        awaitIdle(service);
+        assertThat(client.images).hasSize(1);
+        AgentImage image = client.images.get(0);
+        assertThat(image).isNotNull();
+        assertThat(image.mime()).isEqualTo("image/png");
+        assertThat(image.bytes()).isEqualTo(3);
+        assertThat(image.base64()).isEqualTo(Base64.getEncoder().encodeToString(bytes));
+    }
+
+    @Test
+    @DisplayName("私聊先发图、再 @：按 imageId 读取并保留 owner 校验")
+    void attachesRecentDirectImageToMention() {
+        byte[] bytes = {9, 8, 7};
+        when(images.load(alice, "img-1"))
+                .thenReturn(new ChatImageService.StoredImage(bytes, "image/jpeg"));
+        client.behavior = listener -> listener.onComplete("看到了");
+        AgentReplyService service = service(properties(true, "小鱼", 1));
+
+        imageCache.rememberDirect("dm:u1:u2", "u1", "img-1");
+        service.afterDirectMessage(alice, "u2", "@小鱼 图里写了什么");
+
+        awaitIdle(service);
+        assertThat(client.images).hasSize(1);
+        assertThat(client.images.get(0).mime()).isEqualTo("image/jpeg");
+        assertThat(client.images.get(0).base64()).isEqualTo(Base64.getEncoder().encodeToString(bytes));
+    }
+
+    @Test
+    @DisplayName("别人刚发的图不会挂到我的提问上")
+    void doesNotAttachAnotherUsersImage() {
+        client.behavior = listener -> listener.onComplete("没有图也能答");
+        AgentReplyService service = service(properties(true, "小鱼", 1));
+
+        imageCache.rememberGroup("group:dev-group", "u2", "data:image/png;base64,AQID");
+        service.afterGroupMessage(alice, "dev-group", "@小鱼 这是什么");
+
+        awaitIdle(service);
+        assertThat(client.images).hasSize(1);
+        assertThat(client.images.get(0)).isNull();
+    }
+
+    @Test
+    @DisplayName("图片过期或读取失败时按纯文本继续，不阻断回答")
+    void fallsBackToTextWhenImageCannotBeRead() {
+        String dataUrl = "data:image/png;base64,AQID";
+        when(images.readGroupDataUrl(dataUrl))
+                .thenThrow(new IllegalStateException("文件不存在"));
+        client.behavior = listener -> listener.onComplete("按文字回答");
+        AgentReplyService service = service(properties(true, "小鱼", 1));
+
+        imageCache.rememberGroup("group:dev-group", "u1", dataUrl);
+        service.afterGroupMessage(alice, "dev-group", "@小鱼 这是什么");
+
+        awaitIdle(service);
+        assertThat(client.images).hasSize(1);
+        assertThat(client.images.get(0)).isNull();
+        assertThat(String.join("", messagesOfType("message").stream()
+                .map(ChatMessage::content).toList())).isEqualTo("按文字回答");
+    }
+
     private List<ChatMessage> messagesOfType(String type) {
         return store.events.stream()
                 .filter(event -> type.equals(event.type()))
@@ -224,6 +310,7 @@ class AgentReplyServiceTest {
     private static final class StubClient implements AgentApiClient {
 
         final List<String> prompts = new ArrayList<>();
+        final List<AgentImage> images = new ArrayList<>();
         volatile Consumer<AgentStreamListener> behavior = listener -> {
         };
 
@@ -235,7 +322,14 @@ class AgentReplyServiceTest {
         @Override
         public void stream(AgentCaller caller, String prompt, String sessionId,
                 AgentStreamListener listener) {
+            stream(caller, prompt, sessionId, null, listener);
+        }
+
+        @Override
+        public void stream(AgentCaller caller, String prompt, String sessionId,
+                AgentImage image, AgentStreamListener listener) {
             prompts.add(prompt);
+            images.add(image);
             behavior.accept(listener);
         }
     }

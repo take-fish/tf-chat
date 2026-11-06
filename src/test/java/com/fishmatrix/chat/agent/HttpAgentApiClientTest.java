@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fishmatrix.chat.config.ChatAgentProperties;
 import com.fishmatrix.common.auth.IdentityHeaders;
 import com.fishmatrix.common.auth.IdentitySigner;
@@ -27,9 +28,11 @@ import org.springframework.beans.factory.ObjectProvider;
 class HttpAgentApiClientTest {
 
     private static final String SECRET = "test-secret";
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private HttpServer server;
     private final AtomicReference<Map<String, List<String>>> chatHeaders = new AtomicReference<>();
+    private final AtomicReference<String> chatBody = new AtomicReference<>();
     private final IdentitySigner signer = new IdentitySigner(SECRET, 0);
 
     @BeforeEach
@@ -43,6 +46,8 @@ class HttpAgentApiClientTest {
             exchange.getRequestHeaders().forEach(
                     (name, values) -> snapshot.put(name, List.copyOf(values)));
             chatHeaders.set(snapshot);
+            chatBody.set(new String(
+                    exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             respond(exchange, """
                     data: {"type":"start"}
 
@@ -150,11 +155,34 @@ class HttpAgentApiClientTest {
     }
 
     @Test
+    @DisplayName("有图时请求体带 image.mime/data，无图时没有 image 字段")
+    void includesImageOnlyWhenPresent() throws Exception {
+        HttpAgentApiClient client = client();
+        client.stream(caller(), "图里是什么", "session-1", new NoopListener());
+
+        assertThat(MAPPER.readTree(chatBody.get()).has("image")).isFalse();
+
+        byte[] bytes = {1, 2, 3};
+        String base64 = Base64.getEncoder().encodeToString(bytes);
+        client.stream(
+                caller(),
+                "图里是什么",
+                "session-1",
+                new AgentImage("image/png", base64, bytes.length),
+                new NoopListener());
+
+        var body = MAPPER.readTree(chatBody.get());
+        assertThat(body.path("message").asText()).isEqualTo("图里是什么");
+        assertThat(body.path("image").path("mime").asText()).isEqualTo("image/png");
+        assertThat(body.path("image").path("data").asText()).isEqualTo(base64);
+    }
+
+    @Test
     @DisplayName("CHAT_AGENT_URL 末尾带 / 也能拼出正确的接口地址")
     void trimsTrailingSlash() {
         ChatAgentProperties properties = new ChatAgentProperties(
                 true, "http://127.0.0.1:8201/", "test", "小鱼",
-                60, 3, 120, 2, 16, 40, 400, 800, 4000, 2000);
+                60, 3, 120, 2, 16, 40, 400, 800, 4000, 2000, 120, 16);
 
         assertThat(properties.baseUrl()).isEqualTo("http://127.0.0.1:8201");
         assertThat(properties.usable("小鱼")).isTrue();
@@ -167,7 +195,7 @@ class HttpAgentApiClientTest {
                 "http://127.0.0.1:" + server.getAddress().getPort(),
                 "test",
                 "",
-                60, 1, 5, 1, 4, 40, 400, 800, 4000, 2000);
+                60, 1, 5, 1, 4, 40, 400, 800, 4000, 2000, 120, 16);
         @SuppressWarnings("unchecked")
         ObjectProvider<IdentitySigner> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(signer);

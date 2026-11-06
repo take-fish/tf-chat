@@ -31,7 +31,7 @@ class AgentProfileCacheTest {
     private static ChatAgentProperties properties(String fallback, int cacheSeconds) {
         return new ChatAgentProperties(
                 true, "http://127.0.0.1:1", "prod", fallback, cacheSeconds,
-                1, 5, 1, 4, 1, 4000, 5, 4000, 2000);
+                1, 5, 1, 4, 1, 4000, 5, 4000, 2000, 120, 16);
     }
 
     @Test

@@ -129,6 +129,21 @@ class ChatImageServiceTest {
                 .hasMessageContaining("群聊图片");
     }
 
+    @Test
+    void readGroupDataUrlReturnsDecodedBytesForAgent() {
+        String dataUrl = "data:image/png;base64," + Base64.getEncoder().encodeToString(PNG);
+
+        ChatImageService.StoredImage stored = service.readGroupDataUrl(dataUrl);
+
+        assertThat(stored).isNotNull();
+        assertThat(stored.contentType()).isEqualTo("image/png");
+        assertThat(stored.bytes()).isEqualTo(PNG);
+
+        assertThatThrownBy(() -> service.readGroupDataUrl("data:image/png;base64,AAAA"))
+                .isInstanceOf(ChatException.class)
+                .hasMessageContaining("格式不一致");
+    }
+
     private ChatProperties properties() {
         return new ChatProperties(
                 false, 60_000, 1000, 500, 200, 2000, 32,
