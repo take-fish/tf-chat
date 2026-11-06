@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
+import com.fishmatrix.chat.agent.AgentImageCache;
 import com.fishmatrix.chat.config.ChatProperties;
 import com.fishmatrix.chat.converter.ChatConverters;
 import com.fishmatrix.chat.entity.ChatMessageEntity;
@@ -78,6 +79,9 @@ class ChatServiceTest {
     @Autowired
     private com.fishmatrix.chat.agent.AgentReplyService agentReplies;
 
+    @Autowired
+    private com.fishmatrix.chat.agent.AgentImageCache agentImages;
+
     @MockitoBean
     private ChatImageService images;
 
@@ -90,6 +94,7 @@ class ChatServiceTest {
         store.offline.clear();
         store.presence.clear();
         store.online.clear();
+        agentImages.clear();
     }
 
     @Test
@@ -155,6 +160,12 @@ class ChatServiceTest {
         assertThat(message.content()).isEqualTo(dataUrl);
         assertThat(storedMessages()).isEmpty();
         assertThat(store.events).extracting("type").containsExactly("message");
+        // 供紧接着的 @ 提问使用：按会话 + 发送者记住这一张群图
+        assertThat(agentImages.get("group:dev-group", "u1"))
+                .hasValueSatisfying(ref -> {
+                    assertThat(ref.kind()).isEqualTo(AgentImageCache.Kind.GROUP_DATA_URL);
+                    assertThat(ref.value()).isEqualTo(dataUrl);
+                });
     }
 
     @Test
@@ -258,6 +269,11 @@ class ChatServiceTest {
         assertThat(message.kind()).isEqualTo(ChatMessage.KIND_IMAGE);
         assertThat(message.content()).isEqualTo("image-1");
         assertThat(storedMessages()).containsExactly(message);
+        assertThat(agentImages.get("dm:u1:u2", "u1"))
+                .hasValueSatisfying(ref -> {
+                    assertThat(ref.kind()).isEqualTo(AgentImageCache.Kind.DIRECT_IMAGE_ID);
+                    assertThat(ref.value()).isEqualTo("image-1");
+                });
     }
 
     @Test
@@ -330,6 +346,7 @@ class ChatServiceTest {
                 groupMapper,
                 readStateMapper,
                 images,
+                agentImages,
                 userId -> {
                     throw ChatException.rateLimited("发送过于频繁");
                 },

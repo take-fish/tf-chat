@@ -8,10 +8,12 @@ import com.fishmatrix.chat.mapper.ChatMessageMapper;
 import com.fishmatrix.chat.model.ChatEvent;
 import com.fishmatrix.chat.model.ChatIdentity;
 import com.fishmatrix.chat.model.ChatMessage;
+import com.fishmatrix.chat.service.ChatImageService;
 import com.fishmatrix.chat.store.ChatStore;
 import com.fishmatrix.chat.util.ConversationIds;
 import com.fishmatrix.common.trace.TraceIds;
 import jakarta.annotation.PreDestroy;
+import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -52,6 +54,8 @@ public class AgentReplyService {
     private final AgentApiClient client;
     private final ChatStore store;
     private final ChatMessageMapper messageMapper;
+    private final AgentImageCache imageCache;
+    private final ChatImageService images;
     private final ThreadPoolExecutor executor;
     private final ConcurrentHashMap<String, Boolean> inFlight = new ConcurrentHashMap<>();
 
@@ -61,13 +65,17 @@ public class AgentReplyService {
             AgentProfileCache profile,
             AgentApiClient client,
             ChatStore store,
-            ChatMessageMapper messageMapper) {
+            ChatMessageMapper messageMapper,
+            AgentImageCache imageCache,
+            ChatImageService images) {
         this.properties = properties;
         this.chatProperties = chatProperties;
         this.profile = profile;
         this.client = client;
         this.store = store;
         this.messageMapper = messageMapper;
+        this.imageCache = imageCache;
+        this.images = images;
         this.executor = new ThreadPoolExecutor(
                 properties.maxConcurrentTurns(),
                 properties.maxConcurrentTurns(),
@@ -114,12 +122,14 @@ public class AgentReplyService {
         if (mention.isEmpty()) {
             return;
         }
+        AgentImageCache.ImageRef imageRef =
+                imageCache.get(conversationId, sender.userId()).orElse(null);
         if (inFlight.putIfAbsent(conversationId, Boolean.TRUE) != null) {
             sink.text("我正在回答上一条，等这条说完再 @ 我一次");
             return;
         }
         try {
-            executor.execute(() -> runTurn(conversationId, sender, mention.get(), sink));
+            executor.execute(() -> runTurn(conversationId, sender, mention.get(), imageRef, sink));
         } catch (RejectedExecutionException exception) {
             inFlight.remove(conversationId);
             sink.text("智能助手正忙，稍后再 @ 我");
@@ -127,15 +137,22 @@ public class AgentReplyService {
     }
 
     private void runTurn(
-            String conversationId, ChatIdentity sender, AgentMention mention, ReplySink sink) {
+            String conversationId,
+            ChatIdentity sender,
+            AgentMention mention,
+            AgentImageCache.ImageRef imageRef,
+            ReplySink sink) {
         String streamId = UUID.randomUUID().toString();
         StreamBuffer buffer = new StreamBuffer(sink, streamId);
         AtomicBoolean finished = new AtomicBoolean();
         try {
+            // 文件/数据库读取放在工作线程，不在 WebSocket 发送线程里做。
+            AgentImage image = resolveImage(imageRef, sender);
             client.stream(
                     AgentCaller.of(sender),
                     sentence(mention.prompt()),
                     "chat:" + conversationId,
+                    image,
                     new AgentStreamListener() {
                         @Override
                         public void onDelta(String text) {
@@ -164,6 +181,33 @@ public class AgentReplyService {
             buffer.fail("智能助手处理失败，请稍后再试");
         } finally {
             inFlight.remove(conversationId);
+        }
+    }
+
+    /**
+     * 把缓存里的图片引用解析成请求体。过期/无权/文件缺失都按纯文本继续，不阻断回答。
+     */
+    private AgentImage resolveImage(AgentImageCache.ImageRef ref, ChatIdentity sender) {
+        if (ref == null) {
+            return null;
+        }
+        try {
+            ChatImageService.StoredImage stored = switch (ref.kind()) {
+                case GROUP_DATA_URL -> images.readGroupDataUrl(ref.value());
+                case DIRECT_IMAGE_ID -> images.load(sender, ref.value());
+            };
+            if (stored == null || stored.bytes() == null || stored.bytes().length == 0
+                    || stored.contentType() == null || stored.contentType().isBlank()) {
+                return null;
+            }
+            return new AgentImage(
+                    stored.contentType(),
+                    Base64.getEncoder().encodeToString(stored.bytes()),
+                    stored.bytes().length);
+        } catch (RuntimeException exception) {
+            // 只记原因，不打印图片内容 / Base64。
+            log.warn("读取 @ 提问的图片失败: {}", exception.getMessage());
+            return null;
         }
     }
 

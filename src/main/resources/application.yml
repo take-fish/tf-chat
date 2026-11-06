@@ -91,6 +91,9 @@ app:
       chunk-interval-ms: 800
       max-reply-chars: 4000
       max-prompt-chars: 2000
+      # 先发图、2 分钟内 @ 助手：按会话+发送者记住最近一张图
+      image-ttl-seconds: ${CHAT_AGENT_IMAGE_TTL_SECONDS:120}
+      image-cache-capacity: ${CHAT_AGENT_IMAGE_CACHE_CAPACITY:16}
 
 management:
   tracing:
