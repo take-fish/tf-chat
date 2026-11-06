@@ -23,4 +23,16 @@ public interface AgentApiClient {
      * @throws AgentUnavailableException 连接失败、鉴权失败或对端返回错误
      */
     void stream(AgentCaller caller, String prompt, String sessionId, AgentStreamListener listener);
+
+    /**
+     * 带一张可选图片的对话。默认实现忽略图片，保持旧实现类（测试桩）兼容。
+     */
+    default void stream(
+            AgentCaller caller,
+            String prompt,
+            String sessionId,
+            AgentImage image,
+            AgentStreamListener listener) {
+        stream(caller, prompt, sessionId, listener);
+    }
 }

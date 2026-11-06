@@ -126,8 +126,24 @@ public class ChatImageService {
 
     /**
      * 群聊图片是临时内容：只校验 data URL 与大小，不落盘、不落库。
+     *
+     * @return 解码后的字节与 MIME，供 @ 助手转发给 OCR 使用
+     */
+    public StoredImage readGroupDataUrl(String content) {
+        ParsedGroupImage parsed = parseGroupDataUrl(content);
+        return new StoredImage(parsed.bytes(), parsed.contentType());
+    }
+
+    /**
+     * 群聊图片是临时内容：只校验 data URL 与大小，不落盘、不落库。
+     *
+     * @return 规范化后的原始 data URL，用于广播和缓存
      */
     public String validateGroupDataUrl(String content) {
+        return parseGroupDataUrl(content).cleaned();
+    }
+
+    private ParsedGroupImage parseGroupDataUrl(String content) {
         String cleaned = content == null ? "" : content.strip();
         if (!cleaned.startsWith("data:image/") || cleaned.length() > properties.maxGroupImageBytes() * 2L) {
             throw ChatException.badRequest("群聊图片格式不合法或体积过大");
@@ -155,10 +171,10 @@ public class ChatImageService {
             throw ChatException.badRequest("群聊图片过大");
         }
         String contentType = detectContentType(bytes);
-        if (contentType == null || !contentType.equals("image/" + (subtype.equals("jpg") ? "jpeg" : subtype))) {
+        if (contentType == null || !contentType.equals("image/" + subtype)) {
             throw ChatException.badRequest("图片内容与声明格式不一致");
         }
-        return cleaned;
+        return new ParsedGroupImage(cleaned, contentType, bytes);
     }
 
     private ChatImage requireImage(String imageId) {
@@ -222,5 +238,8 @@ public class ChatImageService {
     }
 
     public record StoredImage(byte[] bytes, String contentType) {
+    }
+
+    private record ParsedGroupImage(String cleaned, String contentType, byte[] bytes) {
     }
 }

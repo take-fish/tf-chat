@@ -24,7 +24,9 @@ public record ChatAgentProperties(
         int chunkMaxChars,
         int chunkIntervalMs,
         int maxReplyChars,
-        int maxPromptChars) {
+        int maxPromptChars,
+        int imageTtlSeconds,
+        int imageCacheCapacity) {
 
     public ChatAgentProperties {
         baseUrl = baseUrl == null || baseUrl.isBlank() ? "http://127.0.0.1:8201" : baseUrl.strip();
@@ -66,6 +68,12 @@ public record ChatAgentProperties(
         }
         if (maxPromptChars <= 0) {
             maxPromptChars = 2000;
+        }
+        if (imageTtlSeconds <= 0) {
+            imageTtlSeconds = 120;
+        }
+        if (imageCacheCapacity <= 0) {
+            imageCacheCapacity = 16;
         }
     }
 

@@ -1,5 +1,6 @@
 package com.fishmatrix.chat.service;
 
+import com.fishmatrix.chat.agent.AgentImageCache;
 import com.fishmatrix.chat.agent.AgentReplyService;
 import com.fishmatrix.chat.config.ChatProperties;
 import com.fishmatrix.chat.converter.ChatConverters;
@@ -30,11 +31,13 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class ChatService {
 
@@ -48,6 +51,7 @@ public class ChatService {
     private final ChatGroupMapper groupMapper;
     private final ChatReadStateMapper readStateMapper;
     private final ChatImageService images;
+    private final AgentImageCache agentImages;
     private final ChatRateLimiter rateLimiter;
     private final ChatProperties properties;
     private final AgentReplyService agentReplies;
@@ -134,6 +138,10 @@ public class ChatService {
         store.publish(ChatEvent.groupMessage(message));
         if (ChatMessage.KIND_TEXT.equals(normalizedKind)) {
             agentReplies.afterGroupMessage(sender, groupId, normalizedContent);
+        } else if (ChatMessage.KIND_IMAGE.equals(normalizedKind)) {
+            rememberAgentImage(
+                    () -> agentImages.rememberGroup(
+                            ConversationIds.group(groupId), sender.userId(), normalizedContent));
         }
         return message;
     }
@@ -162,6 +170,12 @@ public class ChatService {
             }
             if (ChatMessage.KIND_TEXT.equals(normalizedKind)) {
                 agentReplies.afterDirectMessage(sender, toUserId, normalizedContent);
+            } else if (ChatMessage.KIND_IMAGE.equals(normalizedKind)) {
+                rememberAgentImage(
+                        () -> agentImages.rememberDirect(
+                                ConversationIds.direct(sender.userId(), toUserId),
+                                sender.userId(),
+                                saved.message().content()));
             }
         }
         return saved.message();
@@ -227,6 +241,15 @@ public class ChatService {
 
     public ChatImageService.StoredImage loadImage(ChatIdentity viewer, String imageId) {
         return images.load(viewer, imageId);
+    }
+
+    /** 缓存刚发的图，供紧接着的 @ 使用；缓存失败不能影响图片消息本身。 */
+    private void rememberAgentImage(Runnable action) {
+        try {
+            action.run();
+        } catch (RuntimeException exception) {
+            log.warn("记录 @ 提问图片失败: {}", exception.getMessage());
+        }
     }
 
     public void connect(ChatIdentity identity) {
